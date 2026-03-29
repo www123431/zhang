@@ -23,26 +23,28 @@ except Exception as e:
 def get_access_token():
     """获取微信 Access Token"""
     url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}"
-    res = requests.get(url).json()
-    return res.get("access_token")
+    try:
+        res = requests.get(url).json()
+        return res.get("access_token")
+    except:
+        return None
 
 def send_wechat_template_msg(content):
-    """发送模板消息 (绕过48小时互动限制)"""
+    """发送模板消息 (解决展示不完整/内容为空的问题)"""
     token = get_access_token()
     if not token:
         return {"errcode": -1, "errmsg": "获取 Token 失败"}
     
     url = f"https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}"
     
-    # 构建模板消息体
-    # 注意：这里的 "content" 必须对应你在测试号后台定义的 {{content.DATA}}
+    # 【关键修正】：这里的 "content" 必须严格对应你后台定义的 {{content.DATA}}
     payload = {
         "touser": WX_TOUSER,
         "template_id": WX_TEMPLATE_ID,
         "data": {
-            "content": {
+            "content": {  # 必须叫 content
                 "value": content,
-                "color": "#333333"
+                "color": "#173177"
             }
         }
     }
@@ -72,8 +74,9 @@ if uploaded_file:
                     # 调用 DeepSeek AI
                     client = openai.OpenAI(api_key=AI_API_KEY, base_url="https://api.deepseek.com")
                     
-                    system_prompt = "你是一个温暖的英语老师。请根据用户提供的单词，写一段给妈妈看的英语学习内容。要求：1. 语言亲切温馨；2. 包含单词、音标、简单的例句和中文翻译；3. 排版清晰，适合手机阅读。"
-                    user_prompt = f"这是今天的单词：{', '.join(all_text[:5])}" # 每次取前5个避免消息太长
+                    # 提示词：要求 AI 保持简洁（微信模板消息有字数限制，太长会断掉）
+                    system_prompt = "你是一个温暖的英语老师。请为妈妈写一段英语学习内容。要求：1. 语言温馨；2. 包含单词、音标、意思和1个简单例句；3. 总长度控制在200汉字以内以防微信显示不全。"
+                    user_prompt = f"这是今天的单词：{', '.join(all_text[:3])}" # 每次取3个单词最稳
                     
                     response = client.chat.completions.create(
                         model="deepseek-chat",
@@ -94,12 +97,13 @@ if uploaded_file:
                         st.subheader("📱 推送内容预览：")
                         st.info(ai_content)
                     else:
-                        st.error(f"❌ 微信推送失败：{result.get('errmsg')}")
+                        st.error(f"❌ 微信推送失败：{result}")
                         
                 except Exception as e:
                     st.error(f"⚠️ 运行出错：{str(e)}")
     else:
         st.warning("Word 文档似乎是空的，请检查内容。")
 
+# --- 4. 底部署名 (保留原样) ---
 st.markdown("---")
 st.caption("Proudly built by her Business Analytics student son ❤️")
