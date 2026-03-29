@@ -8,11 +8,10 @@ import random
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. 核心认证配置 (使用原始字符串 r''' 彻底隔离转义干扰)
+# 1. 核心认证配置 (精简唯一逻辑版)
 # ==========================================
 def init_connection():
-    # --- 1. 将私钥强制合并为单行，手动插入 \n ---
-    # 注意：这里每一行后面都紧跟 \n，最后没有多余的回车
+    # 采用显式拼接，确保 Base64 每一行都完美对齐，不受系统换行符干扰
     PRIVATE_KEY_FIXED = (
         "-----BEGIN PRIVATE KEY-----\n"
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDTi7w+YNRB6m4r\n"
@@ -55,40 +54,16 @@ def init_connection():
     scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     
     try:
-        # 使用清洗过的私钥进行认证
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"❌ 认证最终尝试失败: {e}")
-        st.stop()
-
-    # 关键点：手动强制清洗字符串
-    # 1. 移除可能存在的 \r (Windows换行)
-    # 2. 将字面量的 "\n" 替换为真实的换行符
-    clean_key = PRIVATE_KEY_RAW.replace("\r", "").replace("\\n", "\n").strip()
-
-    creds_dict = {
-        "type": "service_account",
-        "project_id": "mom-english-bot",
-        "private_key": clean_key,
-        "client_email": "mom-helper-41@mom-english-bot.iam.gserviceaccount.com",
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }
-    
-    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    
-    try:
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        # 如果还是报错，我们会看到更详细的输出
         st.error(f"❌ 认证初始化失败: {e}")
         st.stop()
 
 # 初始化客户端
 gc = init_connection()
 
-# --- 后续业务逻辑保持不变 ---
+# --- 业务逻辑 ---
 SHEET_NAME = "Mom_English_Study"
 AI_API_KEY = st.secrets["AI_API_KEY"]
 WX_APPID = st.secrets["WX_APPID"]
@@ -97,9 +72,11 @@ WX_TOUSER = st.secrets["WX_TOUSER"]
 WX_TEMPLATE_ID = st.secrets["WX_TEMPLATE_ID"]
 
 # 词库
-EASY_WORDS = ["Water", "Food", "Family", "Son", "Daughter", "Help", "Walk", "Park", "Friend", "Money"]
-MEDIUM_WORDS = ["Market", "Supermarket", "Vegetable", "Fruit", "Kitchen", "Cook", "Drink", "Breakfast"]
-HARD_WORDS = ["Medicine", "Hospital", "Doctor", "Price", "Cheap", "Expensive", "Telephone"]
+WORDS_POOL = {
+    "入门级": ["Water", "Food", "Family", "Son", "Daughter", "Help", "Walk", "Park", "Friend", "Money"],
+    "进阶级": ["Market", "Supermarket", "Vegetable", "Fruit", "Kitchen", "Cook", "Drink", "Breakfast"],
+    "挑战级": ["Medicine", "Hospital", "Doctor", "Price", "Cheap", "Expensive", "Telephone"]
+}
 
 def get_data():
     try:
@@ -122,19 +99,18 @@ def get_review_words(df):
         all_words.extend([w.strip() for w in str(s).split(",")])
     return list(set(all_words))
 
-# UI
+# UI 渲染
 st.set_page_config(page_title="Mom's English Helper", page_icon="👵")
 st.title("👵 妈妈英语全自动助手")
 
 df, worksheet = get_data()
 
 with st.sidebar:
-    st.header("📈 学习状态")
-    st.metric("累计天数", len(df))
-    level = st.radio("难度选择", ["入门级", "进阶级", "挑战级"])
+    st.header("📈 学习看板")
+    st.metric("坚持天数", len(df))
+    level = st.radio("难度选择", list(WORDS_POOL.keys()))
 
-pool = {"入门级": EASY_WORDS, "进阶级": MEDIUM_WORDS, "挑战级": HARD_WORDS}[level]
-today_new = random.sample(pool, 3)
+today_new = random.sample(WORDS_POOL[level], 3)
 today_review = get_review_words(df)
 
 col1, col2 = st.columns(2)
@@ -142,23 +118,23 @@ with col1:
     st.subheader("🆕 今日新词")
     for w in today_new: st.write(f"- **{w}**")
 with col2:
-    st.subheader("🔄 艾宾浩斯复习")
+    st.subheader("🔄 记忆复习")
     if today_review:
         for w in today_review[:3]: st.write(f"- {w}")
     else:
         st.write("暂无任务")
 
-if st.button("🚀 推送并同步云端"):
-    with st.spinner("正在生成内容..."):
+if st.button("🚀 生成并推送给妈妈"):
+    with st.spinner("AI 老师正在备课..."):
         try:
+            # 1. AI 文案
             client = openai.OpenAI(api_key=AI_API_KEY, base_url="https://api.deepseek.com")
             prompt = f"今日单词：{today_new}，复习单词：{today_review}。为老人家写微信推送，含音标、中文、简单例句。200字内。"
             ai_res = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
             push_content = ai_res.choices[0].message.content
 
-            token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}"
-            token = requests.get(token_url).json().get("access_token")
-            
+            # 2. 微信推送
+            token = requests.get(f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}").json().get("access_token")
             payload = {
                 "touser": WX_TOUSER,
                 "template_id": WX_TEMPLATE_ID,
@@ -168,13 +144,13 @@ if st.button("🚀 推送并同步云端"):
 
             if wx_res.get("errcode") == 0:
                 worksheet.append_row([datetime.now().strftime("%Y-%m-%d"), ",".join(today_new)])
-                st.success("✅ 推送成功！")
+                st.success("✅ 已同步至云端并推送成功！")
                 st.balloons()
                 st.info(push_content)
             else:
-                st.error(f"微信报错: {wx_res}")
+                st.error(f"微信接口反馈: {wx_res}")
         except Exception as e:
-            st.error(f"运行失败: {e}")
+            st.error(f"流程执行失败: {e}")
 
 st.divider()
 st.caption("Postgraduate Business Analytics Project ❤️")
