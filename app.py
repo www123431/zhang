@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # ==========================================
 def init_connection():
     # 采用显式拼接，确保 Base64 每一行都完美对齐，不受系统换行符干扰
-    PRIVATE_KEY_FIXED = (
+    PRIVATE_KEY = (
         "-----BEGIN PRIVATE KEY-----\n"
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDTi7w+YNRB6m4r\n"
         "lY6rWCtOaweykWi4YRg17cMYh0gk8EwXIORJQzPQugSYJcu9+pAlEBm2RdzECjcV\n"
