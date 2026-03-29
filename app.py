@@ -11,36 +11,56 @@ from datetime import datetime, timedelta
 # 1. 核心认证配置 (使用原始字符串 r''' 彻底隔离转义干扰)
 # ==========================================
 def init_connection():
-    # 使用 r''' ''' 确保 Python 不会对内容做任何预处理
-    # 请确保 -----BEGIN... 和 -----END... 之间没有任何多余的空格
-    PRIVATE_KEY_RAW = r"""-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDDwWdaKxaAdDjr
-pqBApRgFjxT74fJ8DLZI5F5SE7JtIKW3H9ox6ut/rr2hysFKQmJGYVVwRWX04YKj
-0z82seeeidW4L26t1SGH9pM5no3omEJ51/dYGDj56aGswU08KuJjsFKop2M+QHMG
-6rrKfIwzYhX/YCx6ZBBenD/UQq0Rus9ZDeNLn9OUcXugVhIqmt39lIbCRh/kONl5
-N0HY94VOWbLSEsQgyp2UROtsQ5m8xQmB44BK6KSf3GKQV8gfazMxFRxCxbXACZ2d
-qNuOPick1XeZtWi92wfe9Y0eVtr0jjYw0ypMjl9R/UUtM1DQufXDrTS1Du3dBcQB
-JKxOi4pDAgMBAAECggEADYqT8S9Y26LuixKYNFCXVE8dBv2Ozhj9BRbTFX9qUNU4
-0W2hJOHYz5jRYl9Jtq7X6IF0LROH5YQyCs4iqdBtstBbGeYiFGFRc/vRHGPE8kmS
-E6amZBAs5NDOD8rBYn+e8IFyflsx6M0BiAF10WsDMcy/s8491WuVnE3XtoG0Qi0Y
-eTABtDIyAxt+ubFP/3Ft8pVP5Jjauv8gCgrg8XmrTURwoKk94c3OxvUCRVd5m4Rq
-naJ8z4wcVErxl7ZaEkfUxJG9W52Lfgojnir1SzG1SrlEjpMFcH2vq8EwyNfW7/2po
-vChNjhB4YexJukFPBK1yyDfQeVJo3A3SqEDH7kh6xQKBgQDx9EdP8baHhpkjT8ZW
-5//JfhLbpcCbTa+7cZE7f82Vy7Uem/1xGeEK65tgKA7uvf35u9km91Bpf+xuC7iC
-Ndjn2pYmtCKyNvRpfbyCXCmbO+SxAdonCjI5mg7ntfd5dbwL+nQE9dmCBa8J9WKS
-e3KD4skPTm5miDNl0FnbT2P5pwKBgQDPHo7nXWsFkHTUI7krKpUg+hXCJ9uV7qmy
-ls0EYVExnDzaK4fz9a3EpZGPbOCeEHqp9XB//pVCuuN3YnY2KLd5IG2pJH0SpWDd
-+U5unH0B1iWMPSr4BdGctLN0+iYuPeMugA+ZFBJ+A3Oa342WRP1jf3MHYVNaqrM2
-r8PjfIxGBQKBgEfELC7TRE/Ypa2qqOr4L4+lfJR4CrRGC7zuh6R9WQ54eMWWgUs9
-4NlrXw/bcepwolej11pOeyR/1DIj+dtte2PyGx1pyuzPjhmIORT1n0WzMzcplHqF
-9LXPM2KZP8lgGaH37NfX0GdXpj6u8Uj/oszpxLdsjSSOe6hUb4K0frP7AoGAGMbv
-EX57bw746ufbHu7ZKDjCoZdjDWyfoF2p6Pw7WlP2c6MBgI3DW+LyptW/iSkvg2V5
-L9akxHbW/1EoExKL4FGgzLswuypNjEBmwZS236FenIg0u7b2fGihjzzdlGqS4t0v
-AIEGNUz0Z3KW3YMjTOPSPu/FqPMCvWgJZw1fOoECgYEAsp342gT3gXITeOaeGpxS
-fgCxrQgdh6rY00b6gpvFVtGRv9cx9it87Kzzh4hCyKAUTS6UP2ML7kUCviX4hvNA
-RNr87qAZtv5dMJhKOradeWGY0qo+09+HnZJ5OwFwT0do8klCoBF5noChX8e046rK
-zuf9PU50qEons0dOMTXaPrc=
------END PRIVATE KEY-----"""
+    # --- 1. 将私钥强制合并为单行，手动插入 \n ---
+    # 注意：这里每一行后面都紧跟 \n，最后没有多余的回车
+    PRIVATE_KEY_FIXED = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDTi7w+YNRB6m4r\n"
+        "lY6rWCtOaweykWi4YRg17cMYh0gk8EwXIORJQzPQugSYJcu9+pAlEBm2RdzECjcV\n"
+        "jZ4xnleSi7KsoR87cBgz06PO9qL2Zx+GKaYLgtpF8iicJTganRbRlaGRp1EQUcxN\n"
+        "wKgm+gPYV/KhYEmk3d1SAph7+21KlBHz1/h/LrXtGTEhlkiZrqUmB6I8f47LX4ek\n"
+        "xtJY/hWRu1vVS/Q134m+uQpXQAfbIQg9MimiZgFPxVuTqwgjdphcygI5665r/o5x\n"
+        "jE9VSzWZgCgdZ9AyOfR5qaTc+T82IpDqjnnBl88ouVzQZ2TOlgY5nDO8d8Ojh7ky\n"
+        "VVt/+5ApAgMBAAECggEAANs/izo04PuJtkucFa5zeW7Gci2AYMIeErM4WQHZZv97\n"
+        "Wi4eYnulfggDKZltX4+zWot1kTB4XimDUzpJxhfNV4Kd7SQKjNqHGVs3Ku9PPFbK\n"
+        "4/RvKS8enCeIpmfIeDCDeMLlpS6jjdpI7Mko6erh9Fo+mUyBa9ItBm5ltX3KEahx\n"
+        "kZPhFlOGoH6NuGHdZuIoKJEwg0/apQnN1oDMbzE5lr8m7/XHbTsurA3P1ejTNieP\n"
+        "HrFGuLhPg+JZEay2lf4uZ5HkkppfeW0qM8pKOFXGqPMZ2V+YFrWjzzfCvtfSKrqE\n"
+        "ZLuSevlVacJIznOPwlwl+4vP1bwtcqJWponSAI99cQKBgQD1oT1tL1gFMvj2gZ/K\n"
+        "ZIlY9qFN25xP/eItwRunm/3yCuY5/oEYJrGVn06lkT3qJsrMds02L4qxl/nX7dgv\n"
+        "xcS5HhXkvRSJVKOASqa85OxmSpKtj6ODNKkljLytBUX8ByacFC9XObaR23HO4sZ2\n"
+        "vcgFVwTWHYWH9cJeDXNcRkY1UQKBgQDceh3SiXOxdI33lMLEmGu3NmvGsC6qm8Cs\n"
+        "NWejpLOMKxuU+4/MlnGDrqO9ftDdMxMg4M+aIYM13WlirRnrrmmVMPT16JIVStdT\n"
+        "LrIJ9dZus5+wRcuS3de08Hnle4pwggymtVvE972+yuG/V6xBuM1630STSzus0iKT\n"
+        "ZLATKwzXWQKBgQDznvXW2lM57OGDVPOQgQC87Pj1yPCTYiM38EUmi5BmxaqtMKEH\n"
+        "vDD8TqJpktHO8KTKALbunF66YBrcsLlwQH4qgQ2D7ol04C6+asxPo9yZZnRukn3B\n"
+        "/7QYWyszjHxqSQlhWp/Nqp9KsVWCtefUE81Uhod0eplbTUR3lm2pwsWV0QKBgQCe\n"
+        "EYcUDKu/jDrESAkjfcusPP4kIugyNRx72oYFUu3PDpDlzT2Zhjq4GBsYnrUMAbQz\n"
+        "HDp63I//rFAECOrOh+r2pXTaYPVrAo9B+fZ3IaOtFmbksAV1tEsUVFxwZJQqeXKs\n"
+        "itXSb3PAOCCFWEwNinr3Ht9BYuzTyIw1dDiwZWr9cQKBgCQ633Y6RLRNzZJjJEOJ\n"
+        "RUA4x/rfCKi4aYQebHSXVvEzpeEKnXUyxF/pHeH0VOxW7kJUuM9DpFaP4q6AOnXN\n"
+        "wNxQkrHH+PBES5EQzG2EUeovYlvLLxuic380ZoSbgSWSrP1d+eOZGvLLTXyeSOvn\n"
+        "JARBJCgKNIPGN8YJcdINsAWH\n"
+        "-----END PRIVATE KEY-----"
+    )
+
+    creds_dict = {
+        "type": "service_account",
+        "project_id": "mom-english-bot",
+        "private_key": PRIVATE_KEY_FIXED,
+        "client_email": "mom-helper-41@mom-english-bot.iam.gserviceaccount.com",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    
+    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    
+    try:
+        # 使用清洗过的私钥进行认证
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        return gspread.authorize(creds)
+    except Exception as e:
+        st.error(f"❌ 认证最终尝试失败: {e}")
+        st.stop()
 
     # 关键点：手动强制清洗字符串
     # 1. 移除可能存在的 \r (Windows换行)
