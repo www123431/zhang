@@ -8,11 +8,11 @@ import random
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. 核心认证配置 (精简唯一逻辑版)
+# 1. 核心认证配置 (解决 NameError 和格式报错)
 # ==========================================
 def init_connection():
-    # 采用显式拼接，确保 Base64 每一行都完美对齐，不受系统换行符干扰
-    PRIVATE_KEY = (
+    # 显式拼接私钥，确保每行末尾只有标准换行符 \n，不留空格
+    PRIVATE_KEY_FIXED = (
         "-----BEGIN PRIVATE KEY-----\n"
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDTi7w+YNRB6m4r\n"
         "lY6rWCtOaweykWi4YRg17cMYh0gk8EwXIORJQzPQugSYJcu9+pAlEBm2RdzECjcV\n"
@@ -43,6 +43,7 @@ def init_connection():
         "-----END PRIVATE KEY-----"
     )
 
+    # 构造认证字典，确保引用的变量名正确
     creds_dict = {
         "type": "service_account",
         "project_id": "mom-english-bot",
@@ -57,13 +58,16 @@ def init_connection():
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"❌ 认证初始化失败: {e}")
+        st.error(f"❌ 认证过程出错: {e}")
         st.stop()
 
-# 初始化客户端
+# 初始化全局连接对象
 gc = init_connection()
 
-# --- 业务逻辑 ---
+# ==========================================
+# 2. 业务参数配置 (从 Streamlit Secrets 读取)
+# ==========================================
+# 请确保 Streamlit 后台删除了 G_PRIVATE_KEY，只保留以下 5 个
 SHEET_NAME = "Mom_English_Study"
 AI_API_KEY = st.secrets["AI_API_KEY"]
 WX_APPID = st.secrets["WX_APPID"]
@@ -78,6 +82,9 @@ WORDS_POOL = {
     "挑战级": ["Medicine", "Hospital", "Doctor", "Price", "Cheap", "Expensive", "Telephone"]
 }
 
+# ==========================================
+# 3. 数据处理逻辑
+# ==========================================
 def get_data():
     try:
         sh = gc.open(SHEET_NAME)
@@ -91,66 +98,94 @@ def get_data():
 def get_review_words(df):
     if df.empty: return []
     today = datetime.now().date()
+    # 转换日期格式进行对比
     df['date_dt'] = pd.to_datetime(df['date']).dt.date
+    # 简单的复习逻辑：昨天学过的和4天前学过的
     targets = [today - timedelta(days=1), today - timedelta(days=4)]
     review_list = df[df['date_dt'].isin(targets)]['words'].tolist()
+    
     all_words = []
     for s in review_list:
         all_words.extend([w.strip() for w in str(s).split(",")])
     return list(set(all_words))
 
-# UI 渲染
+# ==========================================
+# 4. UI 界面设计
+# ==========================================
 st.set_page_config(page_title="Mom's English Helper", page_icon="👵")
 st.title("👵 妈妈英语全自动助手")
 
 df, worksheet = get_data()
 
+# 侧边栏状态
 with st.sidebar:
-    st.header("📈 学习看板")
-    st.metric("坚持天数", len(df))
-    level = st.radio("难度选择", list(WORDS_POOL.keys()))
+    st.header("📈 学习状态")
+    st.metric("累计坚持", f"{len(df)} 天")
+    level = st.radio("当前难度", list(WORDS_POOL.keys()))
+    st.divider()
+    st.caption("Postgraduate Business Analytics Project")
 
+# 主界面：任务分配
 today_new = random.sample(WORDS_POOL[level], 3)
 today_review = get_review_words(df)
 
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("🆕 今日新词")
-    for w in today_new: st.write(f"- **{w}**")
+    for w in today_new:
+        st.success(f"**{w}**")
+
 with col2:
     st.subheader("🔄 记忆复习")
     if today_review:
-        for w in today_review[:3]: st.write(f"- {w}")
+        for w in today_review[:3]:
+            st.warning(f"**{w}**")
     else:
-        st.write("暂无任务")
+        st.info("暂无复习任务")
 
-if st.button("🚀 生成并推送给妈妈"):
-    with st.spinner("AI 老师正在备课..."):
+# ==========================================
+# 5. 执行推送与同步
+# ==========================================
+if st.button("🚀 生成 AI 课件并推送到微信", use_container_width=True):
+    with st.spinner("AI 老师正在备课，请稍候..."):
         try:
-            # 1. AI 文案
+            # 1. 调用 DeepSeek 生成文案
             client = openai.OpenAI(api_key=AI_API_KEY, base_url="https://api.deepseek.com")
-            prompt = f"今日单词：{today_new}，复习单词：{today_review}。为老人家写微信推送，含音标、中文、简单例句。200字内。"
-            ai_res = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
+            prompt = (f"你是一位温柔的英语老师。请为一位老人家编写今日学习内容。\n"
+                      f"新单词：{today_new}，需要复习：{today_review}。\n"
+                      f"要求：包含音标、中文意思和1个非常生活化的简单短句。总字数在200字以内。")
+            
+            ai_res = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "user", "content": prompt}]
+            )
             push_content = ai_res.choices[0].message.content
 
-            # 2. 微信推送
-            token = requests.get(f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}").json().get("access_token")
+            # 2. 获取微信 Token 并推送
+            token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}"
+            token = requests.get(token_url).json().get("access_token")
+            
             payload = {
                 "touser": WX_TOUSER,
                 "template_id": WX_TEMPLATE_ID,
-                "data": {"content": {"value": push_content}}
+                "data": {
+                    "content": {"value": push_content, "color": "#173177"}
+                }
             }
             wx_res = requests.post(f"https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}", json=payload).json()
 
+            # 3. 推送成功后同步到 Google Sheets
             if wx_res.get("errcode") == 0:
                 worksheet.append_row([datetime.now().strftime("%Y-%m-%d"), ",".join(today_new)])
-                st.success("✅ 已同步至云端并推送成功！")
                 st.balloons()
-                st.info(push_content)
+                st.success("✅ 发送成功！妈妈的微信已经收到提醒啦。")
+                with st.expander("查看发送给妈妈的内容"):
+                    st.write(push_content)
             else:
-                st.error(f"微信接口反馈: {wx_res}")
+                st.error(f"微信推送失败: {wx_res}")
+
         except Exception as e:
-            st.error(f"流程执行失败: {e}")
+            st.error(f"运行出错: {e}")
 
 st.divider()
-st.caption("Postgraduate Business Analytics Project ❤️")
+st.caption("Developed with ❤️ for Mom")
