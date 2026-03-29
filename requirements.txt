@@ -2,3 +2,5 @@ streamlit
 python-docx
 openai
 requests
+st-gsheets-connection
+pandas
