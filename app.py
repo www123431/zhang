@@ -1,11 +1,12 @@
 import streamlit as st
-import docx
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 import openai
 import requests
 import random
 from datetime import datetime, timedelta
 
-# --- 1. 配置加载 (保持不变) ---
+# --- 1. 配置加载 ---
 try:
     WX_APPID = st.secrets["WX_APPID"]
     WX_SECRET = st.secrets["WX_SECRET"]
@@ -13,24 +14,41 @@ try:
     WX_TEMPLATE_ID = st.secrets["WX_TEMPLATE_ID"]
     AI_API_KEY = st.secrets["AI_API_KEY"]
 except Exception as e:
-    st.error("❌ Secrets 缺失！")
+    st.error("❌ Secrets 缺失，请检查配置。")
     st.stop()
 
-# --- 2. 词库分类 (简化展示) ---
-WORDS_DB = {
-    "入门级": ["the", "be", "to", "and", "a", "in", "I", "it", "for", "on", "Water", "Food", "Family"],
-    "进阶级": ["have", "that", "not", "this", "but", "his", "will", "Market", "Cook", "Breakfast"],
-    "挑战级": ["would", "their", "which", "Price", "Cheap", "Expensive", "Medicine", "Pain"]
-}
+# --- 2. 核心单词本 (带难度分级) ---
+EASY_WORDS = ["the", "be", "to", "and", "a", "in", "I", "it", "for", "on", "Water", "Food", "Family", "Son", "Daughter", "Help", "Walk", "Park", "Friend", "Money", "Shop"]
+MEDIUM_WORDS = ["have", "that", "not", "this", "but", "his", "by", "from", "they", "say", "will", "one", "all", "there", "what", "so", "up", "out", "if", "about", "who", "get", "go", "when", "make", "can", "like", "time", "just", "know", "take", "people", "year", "your", "some", "see", "now", "look", "come", "back", "after", "use", "how", "our", "work", "first", "well", "way", "want", "give", "most", "Market", "Supermarket", "Vegetable", "Fruit", "Kitchen", "Cook", "Drink", "Breakfast", "Lunch", "Dinner", "Doctor", "Hospital"]
+HARD_WORDS = ["would", "their", "which", "into", "could", "them", "other", "than", "then", "only", "its", "over", "think", "also", "two", "even", "because", "any", "these", "Price", "Cheap", "Expensive", "Medicine", "Pain", "Telephone", "Grandchild"]
 
-# --- 3. 核心功能函数 ---
+# --- 3. 数据库与复习逻辑 ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_access_token():
-    url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}"
-    return requests.get(url).json().get("access_token")
+def get_history():
+    try:
+        # 读取表格，强制 date 为字符串防止格式混乱
+        return conn.read(ttl=0) 
+    except:
+        return pd.DataFrame(columns=["date", "words"])
 
+def get_ebbinghaus_review(df):
+    """根据艾宾浩斯曲线(1天, 4天)找复习词"""
+    if df.empty: return []
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    four_days_ago = (datetime.now() - timedelta(days=4)).strftime("%Y-%m-%d")
+    
+    # 过滤出匹配日期的单词
+    review_rows = df[df['date'].astype(str).isin([yesterday, four_days_ago])]
+    words_to_review = []
+    for val in review_rows['words']:
+        words_to_review.extend([w.strip() for w in str(val).split(",")])
+    return list(set(words_to_review))
+
+# --- 4. 微信推送函数 ---
 def send_wechat_msg(content):
-    token = get_access_token()
+    token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={WX_APPID}&secret={WX_SECRET}"
+    token = requests.get(token_url).json().get("access_token")
     url = f"https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}"
     payload = {
         "touser": WX_TOUSER,
@@ -39,89 +57,57 @@ def send_wechat_msg(content):
     }
     return requests.post(url, json=payload).json()
 
-# --- 4. 艾宾浩斯算法模拟 ---
-# 在没有外部数据库的情况下，我们通过 session_state 模拟一个学习日志
-if 'study_log' not in st.session_state:
-    st.session_state.study_log = {} # 格式: {日期: [单词列表]}
-
 # --- 5. Streamlit 界面 ---
-st.set_page_config(page_title="妈妈英语助手-艾宾浩斯版", page_icon="📈")
-st.title("👵 妈妈英语：艾宾浩斯科学复习版")
+st.set_page_config(page_title="妈妈英语助手-全自动版", page_icon="📈")
+st.title("👵 妈妈英语：艾宾浩斯全自动版")
 
-# 侧边栏
-st.sidebar.header("📈 学习数据统计")
-st.sidebar.write(f"已打卡天数: {len(st.session_state.study_log)} 天")
+# 侧边栏：显示进度
+history_df = get_history()
+st.sidebar.header(f"📊 已累计打卡 {len(history_df)} 天")
+if not history_df.empty:
+    st.sidebar.write("最近学过：", history_df.tail(3))
 
 # 难度调节
 level = st.select_slider('选择难度：', options=['入门级', '进阶级', '挑战级'])
-word_pool = WORDS_DB[level]
+pool = {"入门级": EASY_WORDS, "进阶级": MEDIUM_WORDS, "挑战级": HARD_WORDS}[level]
 
-st.markdown("---")
+# 生成今日内容
+new_words = random.sample(pool, 3)
+review_words = get_ebbinghaus_review(history_df)
 
-# 逻辑核心：今日计划
-today_str = datetime.now().strftime("%Y-%m-%d")
-yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-four_days_ago_str = (datetime.now() - timedelta(days=4)).strftime("%Y-%m-%d")
+st.divider()
+st.write(f"🆕 **今日新词**：{', '.join(new_words)}")
+if review_words:
+    st.write(f"🔄 **科学复习**：{', '.join(review_words[:3])}")
+else:
+    st.caption("暂无需要复习的词汇，坚持学习明天就会出现复习任务哦！")
 
-# 1. 获取新词
-new_words = random.sample(word_pool, 2)
-
-# 2. 获取复习词 (模拟艾宾浩斯曲线：复习昨天和4天前的内容)
-review_words = []
-if yesterday_str in st.session_state.study_log:
-    review_words.extend(st.session_state.study_log[yesterday_str])
-if four_days_ago_str in st.session_state.study_log:
-    review_words.extend(st.session_state.study_log[four_days_ago_str])
-
-st.subheader("🗓️ 今日学习清单")
-col1, col2 = st.columns(2)
-with col1:
-    st.write("**🆕 今日新词:**")
-    for w in new_words: st.write(f"- {w}")
-with col2:
-    st.write("**🔄 科学复习 (艾宾浩斯):**")
-    if review_words:
-        for w in review_words[:2]: st.write(f"- {w} (温故知新)")
-    else:
-        st.write("新开始，暂无复习词")
-
-# --- 6. 生成并推送 ---
-if st.button("🚀 开启科学复习推送"):
-    with st.spinner('🤖 AI 正在根据遗忘曲线编排内容...'):
+if st.button("🚀 开启今日科学推送"):
+    with st.spinner('🤖 AI 正在编排内容并同步云端...'):
         try:
+            # 1. AI 生成
             client = openai.OpenAI(api_key=AI_API_KEY, base_url="https://api.deepseek.com")
-            
-            # AI 提示词注入艾宾浩斯逻辑
-            prompt = f"""
-            你是一个温暖的英语老师。
-            今日新词：{', '.join(new_words)}
-            复习旧词：{', '.join(review_words) if review_words else '无'}
-            请写一段话：
-            1. 先用亲切的话语鼓励妈妈；
-            2. 简要讲解新词（音标、意思、例句）；
-            3. 如果有旧词，顺带提一句复习（例如：还记得昨天的xx吗？）；
-            4. 严格控制在200字内，适合微信阅读。
-            """
-            
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}]
-            )
+            prompt = f"你是一个温暖的英语老师。今日新词：{new_words}。复习词：{review_words}。请写一段温馨的微信推送，包含音标、意思、生活化例句。200字内。"
+            response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
             ai_content = response.choices[0].message.content
             
-            # 执行推送
-            result = send_wechat_msg(ai_content)
+            # 2. 微信推送
+            res = send_wechat_msg(ai_content)
             
-            if result.get("errcode") == 0:
-                # 记录学习日志（BA 数据的持久化模拟）
-                st.session_state.study_log[today_str] = new_words
+            if res.get("errcode") == 0:
+                # 3. 写入 Google Sheets (数据持久化)
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                new_row = pd.DataFrame({"date": [today_str], "words": [",".join(new_words)]})
+                updated_df = pd.concat([history_df, new_row], ignore_index=True)
+                conn.update(data=updated_df)
+                
                 st.balloons()
-                st.success("🎉 科学推送成功！已记录今日学习进度。")
+                st.success("🎉 推送成功！数据已同步至 Google Sheets。")
                 st.info(ai_content)
             else:
-                st.error(f"微信报错: {result}")
+                st.error(f"推送失败：{res}")
         except Exception as e:
-            st.error(f"技术故障: {e}")
+            st.error(f"发生错误：{e}")
 
 st.markdown("---")
 st.caption("Proudly built by her Business Analytics student son ❤️")
