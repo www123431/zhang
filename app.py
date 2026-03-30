@@ -88,15 +88,31 @@ ws_lib = sh.worksheet("Sheet1")
 lib_data = ws_lib.get_all_values()
 lib_df = pd.DataFrame(lib_data[1:], columns=[c.lower().strip() for c in lib_data[0]])
 
-# 准备日志表
-try:
-    ws_log = sh.worksheet("Learning_Log")
-except:
-    ws_log = sh.add_worksheet(title="Learning_Log", rows="1000", cols="5")
-    ws_log.append_row(["date", "word", "meaning", "notes", "level"])
+# ==========================================
+# 3. 数据中枢：准备日志表 (修复版逻辑)
+# ==========================================
 
+# 获取所有工作表的标题列表
+worksheet_list = [sheet.title for sheet in sh.worksheets()]
+
+if "Learning_Log" in worksheet_list:
+    # 如果存在，直接读取
+    ws_log = sh.worksheet("Learning_Log")
+else:
+    # 如果不存在，再创建
+    try:
+        ws_log = sh.add_worksheet(title="Learning_Log", rows="1000", cols="5")
+        ws_log.append_row(["date", "word", "meaning", "notes", "level"])
+    except Exception as e:
+        st.error(f"创建日志表失败: {e}")
+        st.stop()
+
+# 读取最新的日志数据
 log_data = ws_log.get_all_values()
-raw_log_df = pd.DataFrame(log_data[1:], columns=[c.lower().strip() for c in log_data[0]])
+if len(log_data) > 1:
+    raw_log_df = pd.DataFrame(log_data[1:], columns=[c.lower().strip() for c in log_data[0]])
+else:
+    raw_log_df = pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
 
 # ==========================================
 # 4. 功能模块
