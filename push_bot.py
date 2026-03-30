@@ -73,15 +73,23 @@ try:
     df, task_name = get_sheet_data()
     
     # 2. 🌟 智能对账模式：只有没记录时才发送
-today_str = str(datetime.date.today())
-# 检查日期字段（兼容表头名字）
-date_col = 'date' if 'date' in df.columns else df.columns[0]
-has_record = today_str in df[date_col].astype(str).values
+    today_str = str(datetime.date.today())
+    # 检查日期字段（兼容表头名字）
+    date_col = 'date' if 'date' in df.columns else df.columns[0]
+    has_record = today_str in df[date_col].astype(str).values
 
-if not has_record:
-    print(f"📡 检测到今日未入账，正在申请 AI 催清收...")
-    msg = get_ai_msg(task_name)
-    send_wx(msg)
-    print(f"✅ 提醒已发送: {task_name}")
-else:
-    print(f"✅ 今日已完成{task_name}，资产状态正常，无需提醒。")
+    if not has_record:
+        print(f"📡 检测到今日未入账，正在申请 AI 催清收...")
+        msg = get_ai_msg(task_name)
+        send_wx(msg)
+        print(f"✅ 提醒已发送: {task_name}")
+    else:
+        print(f"✅ 今日已完成{task_name}，资产状态正常，无需提醒。")
+
+except Exception as e:
+    error_msg = f"❌ 脚本运行失败: {str(e)}"
+    print(error_msg)
+    try:
+        send_wx(f"系统审计报告：运行出错。详情：{str(e)[:100]}")
+    except:
+        pass
