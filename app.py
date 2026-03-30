@@ -3,10 +3,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import datetime
-import random
+import time
 
 # ==========================================
-# 1. 核心认证 (保持你已经跑通的逻辑)
+# 1. 核心认证 (使用你已跑通的 Secrets 逻辑)
 # ==========================================
 def init_connection():
     try:
@@ -21,105 +21,126 @@ def init_connection():
         st.stop()
 
 # ==========================================
-# 2. 艾宾浩斯复习算法
+# 2. 艾宾浩斯复习逻辑 (BA 自动化筛选)
 # ==========================================
-def get_review_words(df):
+def get_review_data(df):
     if df.empty: return pd.DataFrame()
+    # 确保日期格式统一
+    df['date'] = pd.to_datetime(df['date']).dt.date
     today = datetime.date.today()
-    # 遗忘曲线关键节点（天数）
-    intervals = [1, 3, 7, 15, 30]
-    review_dates = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in intervals]
+    # 遗忘曲线节点：1天前, 3天前, 7天前
+    intervals = [1, 3, 7]
+    target_dates = [today - datetime.timedelta(days=i) for i in intervals]
     
-    # 筛选出刚好处于这些日期的单词
-    review_df = df[df['date'].isin(review_dates)]
-    # 如果太多，随机抽10个；如果太少，全部显示
-    if len(review_df) > 10:
-        return review_df.sample(10)
-    return review_df
+    review_df = df[df['date'].isin(target_dates)]
+    return review_df.head(10) # 每天复习前10个
 
 # ==========================================
-# 3. 页面样式美化
+# 3. 页面配置与 UI 美化
 # ==========================================
 st.set_page_config(page_title="卿姐英语加油站", page_icon="💃", layout="wide")
 
-# 自定义 CSS 让界面更精致
+# 修正后的 CSS
 st.markdown("""
     <style>
-    .main { background-color: #fff5f5; }
-    .stButton>button { border-radius: 20px; border: 1px solid #ff4b4b; transition: all 0.3s; }
-    .stButton>button:hover { background-color: #ff4b4b; color: white; transform: scale(1.05); }
-    .word-card { background: white; padding: 20px; border-radius: 15px; box-shadow: 2px 2px 10px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 5px solid #ff4b4b; }
+    .stApp { background-color: #FFF9FB; }
+    .word-card { 
+        background: white; 
+        padding: 1.5rem; 
+        border-radius: 1rem; 
+        border-left: 6px solid #FF4B4B;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 1rem;
+    }
+    .review-tag { color: #FF4B4B; font-weight: bold; font-size: 0.9rem; }
     </style>
-    """, unsafe_allow_url=True)
+    """, unsafe_allow_html=True)
 
 st.title("💃 卿姐英语加油站")
-st.caption("科学记忆 + AI 助攻 | 卿姐今天也要元气满满哦！")
+st.write(f"今天是 {datetime.date.today()} | 卿姐，今天也要元气满满哦！✨")
 
-# 初始化数据
+# 加载数据
 gc = init_connection()
 sh = gc.open("Mom_English_Study")
 worksheet = sh.get_worksheet(0)
-all_values = worksheet.get_all_values()
-df = pd.DataFrame(all_values[1:], columns=all_values[0]) if len(all_values) > 1 else pd.DataFrame(columns=["date", "words", "meaning", "notes"])
+all_vals = worksheet.get_all_values()
+
+# 数据框初始化 (处理空表头情况)
+if len(all_vals) > 1:
+    df = pd.DataFrame(all_vals[1:], columns=all_vals[0])
+else:
+    df = pd.DataFrame(columns=["date", "words", "meaning", "notes"])
 
 # ==========================================
-# 4. 核心功能区
+# 4. 核心功能 Tab
 # ==========================================
-tabs = st.tabs(["🌟 今日新词", "🔄 温故知新", "📚 全部记录"])
+tab1, tab2, tab3 = st.tabs(["🌟 今日新词 (10个)", "🔄 艾宾浩斯复习", "📚 学习档案"])
 
-# --- Tab 1: 今日新词 ---
-with tabs[0]:
-    st.subheader("🔥 卿姐，今日份的10个新单词挑战！")
+with tab1:
+    st.subheader("🔥 卿姐，今日份的新词挑战！")
     
-    if st.button("✨ 召唤 AI 生成今日 10 个新词"):
-        with st.spinner("AI 正在为卿姐编写有趣的段子..."):
-            # 这里是模拟生成逻辑，实际可接入 DeepSeek 循环生成 10 个
-            new_words_mock = [
-                {"word": "Ambition", "meaning": "雄心/野心", "note": "卿姐，咱这气质就叫 Ambition，搞事业的女人最美！"},
-                {"word": "Glow", "meaning": "发光/焕发", "note": "早起护肤后的皮肤状态就叫 Glow，透亮！"},
-                {"word": "Resilient", "meaning": "有韧性的", "note": "像卿姐一样心态超稳，什么困难都能弹开～"},
-                # ... 循环10个
+    if st.button("🚀 召唤 AI 生成 10 个生动词汇"):
+        with st.spinner("正在为卿姐量身定制内容..."):
+            # 模拟 AI 生成 10 个词的列表
+            # 实际接入时，请在这里循环调用 DeepSeek API
+            new_list = []
+            words_pool = [
+                ("Elegance", "优雅", "卿姐的代名词！记法：饿了也保持精致(Gance)，就是优雅。"),
+                ("Sparkle", "闪耀", "卿姐眼睛里有星辰！记法：Spark(火花)+le，每天闪亮亮。"),
+                ("Confident", "自信", "搞事业的卿姐最美。记法：Con(全部)+fident(信任)，全方位相信自己！"),
+                ("Radiant", "光彩照人", "形容卿姐今天的气色。记法：像Radius(半径)一样散发光芒。"),
+                ("Fabulous", "棒极了", "卿姐做的决定总是 Fabulous！"),
+                ("Vibrant", "充满活力的", "卿姐每天的能量值。"),
+                ("Wisdom", "智慧", "岁月沉淀的美。"),
+                ("Inspire", "鼓舞", "卿姐总是能激励身边的人。"),
+                ("Graceful", "得体的", "举手投足间的魅力。"),
+                ("Balance", "平衡", "卿姐最擅长平衡生活与爱好。")
             ]
-            st.session_state['today_new'] = new_words_mock
-    
-    if 'today_new' in st.session_state:
-        for idx, w in enumerate(st.session_state['today_new']):
-            with st.container():
-                st.markdown(f"""<div class="word-card">
-                    <h3>{idx+1}. {w['word']}</h3>
-                    <p><b>释义：</b> {w['meaning']}</p>
-                    <p><i>💡 卿姐专属记法：{w['note']}</i></p>
-                </div>""", unsafe_allow_html=True)
+            for w, m, n in words_pool:
+                new_list.append({"date": str(datetime.date.today()), "words": w, "meaning": m, "notes": n})
+            
+            st.session_state['new_words'] = new_list
+
+    if 'new_words' in st.session_state:
+        for item in st.session_state['new_words']:
+            st.markdown(f"""
+                <div class="word-card">
+                    <span style="color:gray; font-size:0.8rem;">NEW单词</span>
+                    <h3 style="margin:0;">{item['words']}</h3>
+                    <p><b>意思：</b>{item['meaning']}</p>
+                    <p style="color:#555;"><i>💡 卿姐助记：{item['notes']}</i></p>
+                </div>
+            """, unsafe_allow_html=True)
         
-        if st.button("✅ 这一组太棒了，同步到我的云端表格"):
-            for w in st.session_state['today_new']:
-                worksheet.append_row([str(datetime.date.today()), w['word'], w['meaning'], w['note']])
-            st.success("同步成功！卿姐太勤奋了～")
+        if st.button("✅ 确认并同步到表格", type="primary"):
+            for item in st.session_state['new_words']:
+                worksheet.append_row([item['date'], item['words'], item['meaning'], item['notes']])
+            st.success("同步成功！卿姐太勤奋了，奖励一朵小红花 🌹")
+            time.sleep(1)
+            st.rerun()
 
-# --- Tab 2: 温故知新 (艾宾浩斯复习) ---
-with tabs[1]:
-    st.subheader("🔁 根据记忆曲线，这 10 个词该复习啦")
-    review_df = get_review_words(df)
+with tab2:
+    st.subheader("🔁 卿姐，温故而知新")
+    review_data = get_review_data(df)
     
-    if not review_df.empty:
-        for _, row in review_df.iterrows():
-            with st.expander(f"📌 单词: {row['words']}"):
+    if not review_data.empty:
+        st.write("根据艾宾浩斯遗忘曲线，这几个词需要卿姐回想一下哦：")
+        for _, row in review_data.iterrows():
+            with st.expander(f"✨ 单词: {row['words']}"):
                 st.write(f"**意思**: {row['meaning']}")
-                st.write(f"**当时笔记**: {row['notes']}")
-                st.button("记住了", key=row['words'])
+                st.write(f"**助记**: {row['notes']}")
+                st.write(f"**初次学习日期**: {row['date']}")
+                st.button("记住了！", key=f"btn_{row['words']}")
     else:
-        st.info("卿姐，目前还没有需要复习的词，先去学点新的吧！")
+        st.info("卿姐，目前还没有复习任务，继续保持哦！")
 
-# --- Tab 3: 全部记录 ---
-with tabs[2]:
+with tab3:
+    st.subheader("📚 卿姐的学习足迹")
     st.dataframe(df, use_container_width=True)
 
-# ==========================================
-# 5. 微信自动推送 (卿姐版)
-# ==========================================
+# 侧边栏推送
 with st.sidebar:
-    st.header("⚙️ 卿姐的设置面板")
-    if st.button("📢 一键推送给卿姐微信"):
-        st.toast("正在准备推送内容...")
-        # 逻辑：提取今日新词，拼成一段生动的话发给微信
-        st.success("推送成功！快去提醒卿姐看微信～")
+    st.image("https://img.icons8.com/bubbles/200/woman-profile.png")
+    st.header("卿姐专属后台")
+    if st.button("📢 推送今日单词至微信"):
+        st.info("推送功能开发中...（需配置微信 Secrets）")
