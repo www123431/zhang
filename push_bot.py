@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 CORP_ID = os.environ["CORP_ID"]
 CORP_SECRET = os.environ["CORP_SECRET"]
 AGENT_ID = os.environ["AGENT_ID"]
-TO_USER = "obahu3Eh-YsOPCEQjwlwHqZHOfqM"
+TO_USER = "ZhangXiZhe"
 DEEPSEEK_KEY = os.environ["DEEPSEEK_KEY"]
 
 def get_sheet_data():
