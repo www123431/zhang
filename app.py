@@ -1,3 +1,30 @@
+# 1. 在代码最顶部增加这个导入
+from gtts import gTTS
+import base64
+from io import BytesIO
+
+# 2. 定义一个发音辅助函数
+def get_pronunciation_audio(word):
+    tts = gTTS(text=word, lang='en')
+    fp = BytesIO()
+    tts.write_to_fp(fp)
+    # 转换为 base64 编码供 HTML 播放器使用
+    b64 = base64.b64encode(fp.getvalue()).decode()
+    return f'<audio src="data:audio/mp3;base64,{b64}" controls style="height:30px; width:100%; margin-top:10px;"></audio>'
+
+# 3. 在渲染卡片循环中加入播放器
+if 'batch' in st.session_state:
+    for item in st.session_state['batch']:
+        word = item.get('word', 'N/A')
+        audio_html = get_pronunciation_audio(word) # 生成音频
+        
+        st.markdown(f"""
+            <div class="word-card">
+                <span class="pos-badge {get_pos_style(item.get('category'))}">{item.get('category', 'WORD')}</span>
+                <h1 class="big-word">{word}</h1>
+                <div class="meaning-tag">{item.get('chinese', 'N/A')}</div>
+                {audio_html}  </div>
+        """, unsafe_allow_html=True)
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
