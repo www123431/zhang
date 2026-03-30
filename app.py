@@ -138,30 +138,41 @@ with tab1:
             st.cache_data.clear() # 更新数据后清除缓存
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 记忆复苏 (完整保留三连击复习逻辑) ---
+# --- Tab 2: 记忆复苏 (实时反馈版) ---
 with tab2:
     if not raw_log_df.empty:
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
         today = datetime.date.today()
+        # 艾宾浩斯间隔：1天、3天、7天
         targets = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
         rev_pool = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
 
         if rev_pool.empty:
-            st.info("✨ 卿姐，目前的复习任务已全部完成，太棒了！")
+            st.info("✨ 卿姐，今天的复习清单空空如也，去学点新词吧！")
         else:
-            if 'rev_queue' not in st.session_state or st.button("🔄 开启新一轮复习"):
-                sample_rev = rev_pool.sample(min(len(rev_pool), 10)).to_dict('records')
+            # 这里的逻辑修改为：如果队列不存在，或者点击重新开始
+            if 'rev_queue' not in st.session_state or st.button("🔄 刷新复习任务"):
+                # 获取任务，有多少显示多少，上限 10 个
+                num_to_rev = min(len(rev_pool), 10)
+                sample_rev = rev_pool.sample(num_to_rev).to_dict('records')
                 for item in sample_rev: item['count'] = 0
                 st.session_state['rev_queue'] = sample_rev
                 st.session_state['need_new_word'] = True
 
             queue = st.session_state.get('rev_queue', [])
+            # 找出还没到 3 次的词
             unfinished = [i for i in queue if i['count'] < 3]
+            # 记录已经完成的词
+            finished_count = len(queue) - len(unfinished)
+
+            # 顶部状态栏
+            st.progress(finished_count / len(queue) if len(queue) > 0 else 0)
+            st.markdown(f"📈 **当前进度：** 已攻克 {finished_count} / {len(queue)} 个单词")
 
             if not unfinished:
                 st.balloons()
-                st.success("🎉 10 个单词已通过‘三连击’测试！")
-                if st.button("开始下一组"):
+                st.success(f"🎉 卿姐太给力了！这 {len(queue)} 个单词已全部通过‘三连击’测试！")
+                if st.button("再来一组"):
                     del st.session_state['rev_queue']
                     st.rerun()
             else:
@@ -170,27 +181,36 @@ with tab2:
                     st.session_state['need_new_word'] = False
                 
                 curr = st.session_state['active_word']
-                st.markdown(f'<p style="text-align:center; color:#9E9E9E;">强化进度: {curr["count"]}/3</p>', unsafe_allow_html=True)
-                st.markdown(f'<div class="word-card-box"><div class="big-word-text">{curr["word"]}</div><div class="pink-tag">？? ?</div></div>', unsafe_allow_html=True)
+                
+                # 卡片展示
+                st.markdown(f"""
+                    <div class="word-card-box">
+                        <div class="sub-label">强化进度: {curr['count']}/3</div>
+                        <div class="big-word-text">{curr["word"]}</div>
+                        <div class="pink-tag">？? ?</div>
+                    </div>
+                """, unsafe_allow_html=True)
                 play_audio(curr['word'])
 
-                with st.expander("💡 提示"):
+                with st.expander("💡 偷看一眼释义"):
                     st.write(f"释义: {curr['meaning']}")
                 
                 b1, b2 = st.columns(2)
-                if b1.button("✅ 记得", use_container_width=True, type="primary"):
+                if b1.button("✅ 记得 (Count+1)", use_container_width=True, type="primary"):
                     for i in st.session_state['rev_queue']:
-                        if i['word'] == curr['word']: i['count'] += 1
+                        if i['word'] == curr['word']: 
+                            i['count'] += 1
+                            if i['count'] == 3:
+                                st.toast(f"🏆 {i['word']} 已斩获！")
                     st.session_state['need_new_word'] = True
                     st.rerun()
-                if b2.button("❌ 不记得", use_container_width=True):
+                if b2.button("❌ 忘了 (重置进度)", use_container_width=True):
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: i['count'] = 0
                     st.session_state['need_new_word'] = True
-                    st.toast(f"再看一次 {curr['word']}！")
                     st.rerun()
     else:
-        st.warning("先去挑战攒点词汇吧！")
+        st.warning("词库还是空的呢，卿姐先去 Tab 1 挑战一下？")
 
 # --- Tab 3: 足迹 (完整保留 AI 诊断逻辑) ---
 with tab3:
