@@ -138,21 +138,21 @@ with tab1:
             st.cache_data.clear() # 更新数据后清除缓存
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 记忆复苏 (实时反馈版) ---
+# --- Tab 2: 记忆复苏 (实时反馈 + 云端存证版) ---
 with tab2:
     if not raw_log_df.empty:
+        # 1. 准备复习池
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
         today = datetime.date.today()
-        # 艾宾浩斯间隔：1天、3天、7天
+        # 筛选 1, 3, 7 天前的单词进行复习
         targets = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
         rev_pool = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
 
         if rev_pool.empty:
             st.info("✨ 卿姐，今天的复习清单空空如也，去学点新词吧！")
         else:
-            # 这里的逻辑修改为：如果队列不存在，或者点击重新开始
+            # 初始化复习任务
             if 'rev_queue' not in st.session_state or st.button("🔄 刷新复习任务"):
-                # 获取任务，有多少显示多少，上限 10 个
                 num_to_rev = min(len(rev_pool), 10)
                 sample_rev = rev_pool.sample(num_to_rev).to_dict('records')
                 for item in sample_rev: item['count'] = 0
@@ -160,19 +160,17 @@ with tab2:
                 st.session_state['need_new_word'] = True
 
             queue = st.session_state.get('rev_queue', [])
-            # 找出还没到 3 次的词
             unfinished = [i for i in queue if i['count'] < 3]
-            # 记录已经完成的词
             finished_count = len(queue) - len(unfinished)
 
-            # 顶部状态栏
+            # 进度条展示
             st.progress(finished_count / len(queue) if len(queue) > 0 else 0)
             st.markdown(f"📈 **当前进度：** 已攻克 {finished_count} / {len(queue)} 个单词")
 
             if not unfinished:
                 st.balloons()
-                st.success(f"🎉 卿姐太给力了！这 {len(queue)} 个单词已全部通过‘三连击’测试！")
-                if st.button("再来一组"):
+                st.success(f"🎉 卿姐太给力了！这 {len(queue)} 个单词已全部完成‘三连击’！")
+                if st.button("开始下一组"):
                     del st.session_state['rev_queue']
                     st.rerun()
             else:
@@ -182,7 +180,7 @@ with tab2:
                 
                 curr = st.session_state['active_word']
                 
-                # 卡片展示
+                # 单词卡片
                 st.markdown(f"""
                     <div class="word-card-box">
                         <div class="sub-label">强化进度: {curr['count']}/3</div>
@@ -196,17 +194,43 @@ with tab2:
                     st.write(f"释义: {curr['meaning']}")
                 
                 b1, b2 = st.columns(2)
+                
+                # --- 情况 A: 记得单词 ---
                 if b1.button("✅ 记得 (Count+1)", use_container_width=True, type="primary"):
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: 
                             i['count'] += 1
+                            # 🌟 核心改动：达到 3 次时写入云端记录
                             if i['count'] == 3:
-                                st.toast(f"🏆 {i['word']} 已斩获！")
+                                try:
+                                    gc_sync = init_connection()
+                                    sh_sync = gc_sync.open("Sheet1")
+                                    # 检查/获取 Review_Log 表
+                                    try:
+                                        ws_rev = sh_sync.worksheet("Review_Log")
+                                    except:
+                                        ws_rev = sh_sync.add_worksheet("Review_Log", rows="1000", cols="4")
+                                        ws_rev.append_row(["date", "word", "status", "notes"])
+                                    
+                                    # 写入一行复习记录
+                                    ws_rev.append_row([
+                                        str(datetime.date.today()), 
+                                        curr['word'], 
+                                        "✅ 三连击达成", 
+                                        "复习通过"
+                                    ])
+                                    st.toast(f"🏆 {curr['word']} 已记录到复习档案！")
+                                except Exception as e:
+                                    st.warning(f"记录同步失败(不影响复习): {e}")
+                    
                     st.session_state['need_new_word'] = True
                     st.rerun()
+
+                # --- 情况 B: 忘了单词 ---
                 if b2.button("❌ 忘了 (重置进度)", use_container_width=True):
                     for i in st.session_state['rev_queue']:
-                        if i['word'] == curr['word']: i['count'] = 0
+                        if i['word'] == curr['word']: 
+                            i['count'] = 0
                     st.session_state['need_new_word'] = True
                     st.rerun()
     else:
