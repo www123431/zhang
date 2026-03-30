@@ -194,56 +194,63 @@ with tab1:
 # --- Tab 2: 记忆复苏 (艾宾浩斯复习逻辑) ---
 with tab2:
     st.subheader("🔄 记忆复苏节点")
-    # 这里的逻辑是：找出符合 1, 3, 7, 15 天复习周期的单词
+    
     def get_ebbinghaus_list(df):
         if df.empty or 'date' not in df.columns: return pd.DataFrame()
         temp = df.copy()
+        # 强制转换日期格式，防止格式不一报错
         temp['date_dt'] = pd.to_datetime(temp['date'], errors='coerce').dt.date
         today = datetime.date.today()
-        # 遗忘曲线关键点
+        # 科学复习节点：1, 3, 7, 15天
         intervals = [1, 3, 7, 15]
         target_dates = [today - datetime.timedelta(days=i) for i in intervals]
         return temp[temp['date_dt'].isin(target_dates)]
 
     rev_df = get_ebbinghaus_list(raw_log_df)
     if not rev_df.empty:
-        # 去重，只显示每个词最新的状态
-        rev_df = rev_df.drop_duplicates(subset=['word'])
-        cols = st.columns(2)
-        for idx, row in enumerate(rev_df.to_dict('records')):
-            with cols[idx % 2]:
-                st.markdown(f"""
-                <div class="review-card">
-                    <h3 style="color:#2C3E50;">{row['word']}</h3>
-                    <p style="color:#7F8C8D; font-size:0.8rem;">上次打卡：{row['date']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                with st.expander("🔍 揭晓答案"):
-                    st.write(f"**中文含义**: {row['chinese']}")
-                    st.write(f"**词性分类**: {row['category']}")
+        # 确保 word 列存在再进行去重
+        if 'word' in rev_df.columns:
+            rev_df = rev_df.drop_duplicates(subset=['word'])
+            cols = st.columns(2)
+            for idx, row in enumerate(rev_df.to_dict('records')):
+                with cols[idx % 2]:
+                    st.markdown(f"""
+                    <div class="review-card">
+                        <h3 style="color:#2C3E50;">{row.get('word', 'Unknown')}</h3>
+                        <p style="color:#7F8C8D; font-size:0.8rem;">上次打卡：{row.get('date', 'N/A')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    with st.expander("🔍 揭晓答案"):
+                        st.write(f"**中文含义**: {row.get('chinese', '未记录')}")
+                        st.write(f"**词性分类**: {row.get('category', '未分类')}")
     else:
         st.info("✨ 卿姐，今日暂无需要复习的单词，继续保持！")
 
-# --- Tab 3: 学习足迹 (CSV 内容读取与展示) ---
+# --- Tab 3: 学习足迹 (防崩溃增强版) ---
 with tab3:
     st.subheader("📚 唯一词汇档案")
     
-    # 检查 clean_log_df 是否有内容
     if not clean_log_df.empty:
         st.write(f"🎉 卿姐已经累计攻克了 **{len(clean_log_df)}** 个唯一单词！")
         
-        # 整理展示用的 DataFrame
-        display_df = clean_log_df[['date', 'word', 'chinese', 'category', 'level']].copy()
+        # 【核心修复逻辑】：强制对齐列名，缺少的列自动补空，多余的列自动丢弃
+        required_columns = ['date', 'word', 'chinese', 'category', 'level']
+        
+        # reindex 是 BA 处理缺失列的神器，它不会报错，只会把没找到的列填成 NaN
+        display_df = clean_log_df.reindex(columns=required_columns)
+        
+        # 填充缺失值并重命名，让表格好看
+        display_df = display_df.fillna("未记录")
         display_df.columns = ['打卡日期', '单词', '中文释义', '词性', '难度等级']
         
-        # 使用 Streamlit 的高级数据表格显示
+        # 渲染表格
         st.dataframe(
             display_df.sort_values('打卡日期', ascending=False), 
             use_container_width=True,
             hide_index=True
         )
         
-        # 侧边栏提供下载（可选）
+        # 导出功能
         csv = display_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 导出我的词汇库 (CSV)",
