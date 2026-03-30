@@ -180,18 +180,19 @@ with t2:
 # --- Tab 3: 学习足迹 (专项净化优化) ---
 with tab3:
     if not raw_log_df.empty:
-        # 1. 智能去重：同一个单词只保留最后一次打卡记录
+        # 1. 智能去重：同一个单词只保留最后一次记录
         clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last').copy()
         
-        # 2. 【核心优化】：彻底净化数据，把所有 N/A, nan, 空白全部变成真正的空白
+        # 2. 数据净化：把所有 N/A, nan, 空白全部变成真正的空白（彻底解决表格乱码问题）
         for col in ['meaning', 'notes', 'level']:
-            clean_df[col] = clean_df[col].apply(lambda x: "" if str(x).strip().lower() in ["nan", "n/a", "none", ""] else x)
+            if col in clean_df.columns:
+                clean_df[col] = clean_df[col].apply(lambda x: "" if str(x).strip().lower() in ["nan", "n/a", "none", "", "null"] else x)
         
         # 3. 重新排版显示
-        display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level'])
+        display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("")
         display.columns = ['学习日期', '单词', '中文释义', '我的笔记', '掌握难度']
         
-        st.write(f"📊 卿姐已累计攻克了 **{len(clean_df)}** 个词汇！")
+        st.write(f"📊 卿姐已累计攻克了 **{len(clean_df)}** 个唯一词汇！")
         
         # 4. 美化表格展示，隐藏索引
         st.dataframe(
