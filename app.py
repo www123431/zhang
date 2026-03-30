@@ -77,6 +77,41 @@ except:
 
 raw_log_df = pd.DataFrame(ws_log.get_all_values()[1:], columns=[c.lower().strip() for c in ws_log.get_all_values()[0]])
 
+def analyze_learning_progress(log_df):
+    """🧠 调用 DeepSeek 分析卿姐的学习足迹"""
+    if log_df.empty:
+        return "卿姐，目前还没有学习记录，快去开启今天的挑战吧！"
+    
+    # 提取最近的学习样本（例如最近20条记录）
+    recent_words = log_df.tail(20)['word'].tolist()
+    levels = log_df.tail(20)['level'].value_counts().to_dict()
+    
+    api_key = st.secrets.get("deepseek_api_key", "你的KEY")
+    url = "https://api.deepseek.com/chat/completions"
+    
+    prompt = f"""
+    你是卿姐的私人英语助教。以下是她最近的学习数据：
+    - 最近学习的单词：{', '.join(recent_words)}
+    - 掌握难度分布：{levels}
+    
+    请根据这些数据，为卿姐写一份简短的鼓励式周报建议。
+    要求：
+    1. 结合她银行工作的身份，分析她的学习进展。
+    2. 指出她可能面临的挑战（如长词、特定难度词）。
+    3. 给出一个下周的学习锦囊。
+    4. 语气要像女儿/儿子的贴心伙伴，称呼她为‘卿姐’。
+    """
+    
+    try:
+        data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        response = requests.post(url, json=data, headers={"Authorization": f"Bearer {api_key}"})
+        return response.json()['choices'][0]['message']['content']
+    except:
+        return "卿姐，AI 助教正在休息，但你的进步我全看在眼里！继续加油！"
+
 # ==========================================
 # 4. 功能模块
 # ==========================================
@@ -141,20 +176,59 @@ with tab2:
         else:
             st.info("✨ 卿姐太棒了，目前没有到期的复习任务！")
 
-# --- Tab 3: 足迹 (专项去重与数据清洗) ---
+# --- Tab 3: 足迹 (AI 诊断 + 专项去重清洗) ---
 with tab3:
     if not raw_log_df.empty:
-        # 1. 深度清洗：彻底抹除 N/A, nan 等干扰项
+        # 1. 数据预处理（用于 AI 分析）
         clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last').copy()
         for col in ['meaning', 'notes', 'level']:
             if col in clean_df.columns:
                 clean_df[col] = clean_df[col].apply(lambda x: "" if str(x).strip().lower() in ["nan", "n/a", "none", "", "null"] else x)
+
+        # ---------------------------------------------------------
+        # 🚀 新增：AI 学习诊断模块 (放在表格上方)
+        # ---------------------------------------------------------
+        st.markdown("### 📊 卿姐专属 AI 学习诊断")
         
-        # 2. 格式化输出
+        # 定义分析函数（如果之前没定义，请放在代码上方）
+        def analyze_progress(df):
+            api_key = st.secrets.get("deepseek_api_key", "sk-8c10698361c24c71af07315c3abb6582")
+            url = "https://api.deepseek.com/chat/completions"
+            
+            # 提取最近10个词做样本，让AI知道进度
+            sample_words = df.tail(10)['word'].tolist()
+            prompt = f"""
+            角色：卿姐的私人英语助教。卿姐在银行工作。
+            数据：卿姐最近学习了 {len(df)} 个词，最近攻克的词包括：{", ".join(sample_words)}。
+            任务：写一段简短的周报建议（50字内）。
+            要求：幽默亲切，结合银行场景鼓励她。
+            """
+            try:
+                res = requests.post(url, json={
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}]
+                }, headers={"Authorization": f"Bearer {api_key}"}, timeout=8)
+                return res.json()['choices'][0]['message']['content']
+            except:
+                return "卿姐，你最近的学习势头比银行的复利还要强劲！继续保持，你是最棒的！"
+
+        if st.button("🪄 生成本周 AI 学习分析报告", use_container_width=True):
+            with st.spinner("AI 课代表正在翻看卿姐的学习笔记..."):
+                report = analyze_progress(clean_df)
+                st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 20px; border-radius: 15px; border-left: 5px solid #FF69B4; color: #2C3E50;">
+                        🤖 <b>DeepSeek 诊断结果：</b><br>{report}
+                    </div>
+                """, unsafe_allow_html=True)
+        
+        st.divider() # 视觉分割线
+        # ---------------------------------------------------------
+
+        # 2. 格式化表格输出 (原本的表格逻辑)
         display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("")
         display.columns = ['学习日期', '单词', '中文释义', '我的笔记', '掌握难度']
         
-        st.write(f"📊 卿姐已累计攻克了 **{len(clean_df)}** 个词汇！")
+        st.write(f"📈 卿姐已累计攻克了 **{len(clean_df)}** 个唯一词汇！")
         st.dataframe(display.sort_values('学习日期', ascending=False), use_container_width=True, hide_index=True)
         
         csv = display.to_csv(index=False).encode('utf-8-sig')
