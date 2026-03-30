@@ -56,63 +56,47 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 数据中枢 (Google Sheets)
+# 3. 数据中枢 (抗压优化版：防止 429 错误)
 # ==========================================
-@st.cache_resource
-def init_connection():
+@st.cache_data(ttl=300)  # 🌟 关键：数据缓存 5 分钟，5 分钟内不再重复请求 Google
+def fetch_all_data():
+    """一次性读取所有数据，减少 API 调用次数"""
     try:
-        creds_dict = st.secrets["gcp_service_account"].to_dict()
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
-        scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        return gspread.authorize(creds)
+        gc = init_connection()
+        sh = gc.open("Sheet1") # 或者用 open_by_key
+        
+        # 1. 读取词库
+        ws_lib = sh.worksheet("Sheet1")
+        lib_raw = ws_lib.get_all_values()
+        df_lib = pd.DataFrame(lib_raw[1:], columns=[c.lower().strip() for c in lib_raw[0]])
+        
+        # 2. 检查并读取日志表
+        worksheet_list = [sheet.title for sheet in sh.worksheets()]
+        if "Learning_Log" not in worksheet_list:
+            ws_log = sh.add_worksheet(title="Learning_Log", rows="1000", cols="5")
+            ws_log.append_row(["date", "word", "meaning", "notes", "level"])
+            df_log = pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
+        else:
+            ws_log = sh.worksheet("Learning_Log")
+            log_raw = ws_log.get_all_values()
+            if len(log_raw) > 1:
+                df_log = pd.DataFrame(log_raw[1:], columns=[c.lower().strip() for c in log_raw[0]])
+            else:
+                df_log = pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
+        
+        return df_lib, df_log
     except Exception as e:
-        st.error(f"❌ 初始化连接失败，请检查 Secrets 配置。")
-        st.stop()
+        st.error(f"🚨 连接表格失败: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-gc = init_connection()
+# 💡 在页面逻辑开始前调用
+lib_df, raw_log_df = fetch_all_data()
 
-# 🛡️ 尝试打开表格（增加异常处理）
-try:
-    # 如果 gc.open("Sheet1") 依然报错，请把下面的代码改为 gc.open_by_url("你的完整表格URL")
-    sh = gc.open("Sheet1") 
-except gspread.exceptions.SpreadsheetNotFound:
-    st.error("🚨 找不到名为 'Sheet1' 的表格！请检查表格名称，或确保已共享给 Service Account 邮箱。")
-    st.stop()
-except Exception as e:
-    st.error(f"🚨 连接表格时发生错误: {e}")
-    st.stop()
-
-# 读取词库
-ws_lib = sh.worksheet("Sheet1")
-lib_data = ws_lib.get_all_values()
-lib_df = pd.DataFrame(lib_data[1:], columns=[c.lower().strip() for c in lib_data[0]])
-
-# ==========================================
-# 3. 数据中枢：准备日志表 (修复版逻辑)
-# ==========================================
-
-# 获取所有工作表的标题列表
-worksheet_list = [sheet.title for sheet in sh.worksheets()]
-
-if "Learning_Log" in worksheet_list:
-    # 如果存在，直接读取
-    ws_log = sh.worksheet("Learning_Log")
-else:
-    # 如果不存在，再创建
-    try:
-        ws_log = sh.add_worksheet(title="Learning_Log", rows="1000", cols="5")
-        ws_log.append_row(["date", "word", "meaning", "notes", "level"])
-    except Exception as e:
-        st.error(f"创建日志表失败: {e}")
-        st.stop()
-
-# 读取最新的日志数据
-log_data = ws_log.get_all_values()
-if len(log_data) > 1:
-    raw_log_df = pd.DataFrame(log_data[1:], columns=[c.lower().strip() for c in log_data[0]])
-else:
-    raw_log_df = pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
+# 如果需要写入数据（写入操作不建议缓存），依然使用原始连接
+def get_log_worksheet():
+    gc = init_connection()
+    sh = gc.open("Sheet1")
+    return sh.worksheet("Learning_Log")
 
 # ==========================================
 # 4. 功能模块
