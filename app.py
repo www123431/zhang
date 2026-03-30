@@ -226,22 +226,23 @@ with tab2:
     else:
         st.info("✨ 卿姐，今日暂无需要复习的单词，继续保持！")
 
-# --- Tab 3: 学习足迹 (防崩溃增强版) ---
+# --- Tab 3: 学习足迹 (根据卿姐最新表格名适配) ---
 with tab3:
     st.subheader("📚 唯一词汇档案")
     
     if not clean_log_df.empty:
         st.write(f"🎉 卿姐已经累计攻克了 **{len(clean_log_df)}** 个唯一单词！")
         
-        # 【核心修复逻辑】：强制对齐列名，缺少的列自动补空，多余的列自动丢弃
-        required_columns = ['date', 'word', 'chinese', 'category', 'level']
+        # 【核心适配】：改为匹配你图片里的新表头名
+        # 你图片里是：date, word, meaning, notes, level
+        required_columns = ['date', 'word', 'meaning', 'notes', 'level']
         
-        # reindex 是 BA 处理缺失列的神器，它不会报错，只会把没找到的列填成 NaN
+        # 强制对齐
         display_df = clean_log_df.reindex(columns=required_columns)
         
-        # 填充缺失值并重命名，让表格好看
+        # 填充缺失并重命名为中文标签
         display_df = display_df.fillna("未记录")
-        display_df.columns = ['打卡日期', '单词', '中文释义', '词性', '难度等级']
+        display_df.columns = ['打卡日期', '单词', '中文释义', '词性/笔记', '难度等级']
         
         # 渲染表格
         st.dataframe(
@@ -259,4 +260,4 @@ with tab3:
             mime="text/csv",
         )
     else:
-        st.warning("📭 档案室暂时是空的。去‘今日挑战’里打卡，数据就会同步过来啦！")
+        st.warning("📭 档案室暂时是空的。")
