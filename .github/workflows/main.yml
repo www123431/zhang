@@ -1,0 +1,31 @@
+name: Study Reminder Bot
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天新加坡时间 08:00 运行
+    - cron: '0 6 * * *'  # 每天新加坡时间 14:00 运行
+  workflow_dispatch:      # 允许手动点击运行测试
+
+jobs:
+  check_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: os-actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run logic
+        env:
+          CORP_ID: ${{ secrets.CORP_ID }}
+          CORP_SECRET: ${{ secrets.CORP_SECRET }}
+          AGENT_ID: ${{ secrets.AGENT_ID }}
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+        run: python push_bot.py
