@@ -69,9 +69,9 @@ gc = init_connection()
 try:
     # 如果你的总文件名叫 "Mom_English_Study"，请保持不变；
     # 如果你把整个文件也改名了，请修改此处引号内的内容
-    sh = gc.open("Mom_English_Study") 
+    sh = gc.open("Sheet1") 
 except gspread.exceptions.SpreadsheetNotFound:
-    st.error("❌ 找不到名为 'Mom_English_Study' 的文件。请检查文件名或共享权限。")
+    st.error("❌ 找不到名为 'Sheet1' 的文件。请检查文件名或共享权限。")
     st.stop()
 
 # --- 4. 读取工作表 ---
