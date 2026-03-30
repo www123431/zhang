@@ -10,8 +10,17 @@ from io import BytesIO
 from gtts import gTTS
 
 # ==========================================
-# 1. 核心引擎：AI 助记与语音
+# 1. 基础引擎：初始化、语音与 AI 助记
 # ==========================================
+
+def init_connection():
+    """🔧 初始化 Google Sheets 连接 (放在最前供全局调用)"""
+    creds_dict = st.secrets["gcp_service_account"].to_dict()
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
+    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    return gspread.authorize(creds)
+
 def play_audio(word):
     """🎙️ 原生音频播放函数"""
     try:
@@ -27,14 +36,13 @@ def get_ai_mnemonic(word, meaning):
     api_key = st.secrets.get("deepseek_api_key", "sk-8c10698361c24c71af07315c3abb6582")
     url = "https://api.deepseek.com/chat/completions"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    
     prompt = f"角色：你是一名幽默的英语私教，学生‘卿姐’是一位在银行工作的资深员工。任务：为单词 '{word}'（释义：{meaning}）提供一个助记法。要求：结合银行具体场景，语气亲切幽默，开头叫‘卿姐’，40字以内。"
     try:
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
         response = requests.post(url, json=data, headers=headers, timeout=8)
         return response.json()['choices'][0]['message']['content']
     except:
-        return "💡 卿姐，这个词在银行系统中很常见，建议结合日常业务加强记忆。"
+        return "💡 卿姐，这个词在银行系统中很常见，建议结合业务记忆。"
 
 # ==========================================
 # 2. 视觉系统 (CSS 注入)
@@ -56,14 +64,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 数据中枢 (抗压优化版：防止 429 错误)
+# 3. 数据中枢 (抗压优化版)
 # ==========================================
-@st.cache_data(ttl=300)  # 🌟 关键：数据缓存 5 分钟，5 分钟内不再重复请求 Google
+
+@st.cache_data(ttl=300)
 def fetch_all_data():
     """一次性读取所有数据，减少 API 调用次数"""
     try:
         gc = init_connection()
-        sh = gc.open("Sheet1") # 或者用 open_by_key
+        sh = gc.open("Sheet1")
         
         # 1. 读取词库
         ws_lib = sh.worksheet("Sheet1")
@@ -79,24 +88,15 @@ def fetch_all_data():
         else:
             ws_log = sh.worksheet("Learning_Log")
             log_raw = ws_log.get_all_values()
-            if len(log_raw) > 1:
-                df_log = pd.DataFrame(log_raw[1:], columns=[c.lower().strip() for c in log_raw[0]])
-            else:
-                df_log = pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
+            df_log = pd.DataFrame(log_raw[1:], columns=[c.lower().strip() for c in log_raw[0]]) if len(log_raw) > 1 else pd.DataFrame(columns=["date", "word", "meaning", "notes", "level"])
         
         return df_lib, df_log
     except Exception as e:
         st.error(f"🚨 连接表格失败: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# 💡 在页面逻辑开始前调用
+# 全局数据加载
 lib_df, raw_log_df = fetch_all_data()
-
-# 如果需要写入数据（写入操作不建议缓存），依然使用原始连接
-def get_log_worksheet():
-    gc = init_connection()
-    sh = gc.open("Sheet1")
-    return sh.worksheet("Learning_Log")
 
 # ==========================================
 # 4. 功能模块
@@ -111,7 +111,7 @@ with tab1:
     with c2:
         if st.button("🚀 呼叫 DeepSeek 换一批", use_container_width=True):
             selected = lib_df.sample(min(len(lib_df), 8)).to_dict('records')
-            with st.spinner("AI 正在为卿姐编写助记词..."):
+            with st.spinner("AI 正在编写助记词..."):
                 for item in selected:
                     item['ai_tip'] = get_ai_mnemonic(item.get('word'), item.get('meaning'))
             st.session_state['batch'] = selected
@@ -129,14 +129,16 @@ with tab1:
                     </div>
                 """, unsafe_allow_html=True)
                 play_audio(word)
-                st.markdown("<br>", unsafe_allow_html=True)
         
         if st.button("✅ 卿姐记住了，同步云端", type="primary", use_container_width=True):
+            gc_sync = init_connection()
+            ws_sync = gc_sync.open("Sheet1").worksheet("Learning_Log")
             for i in st.session_state['batch']:
-                ws_log.append_row([str(datetime.date.today()), i.get('word'), i.get('meaning'), i.get('notes'), lvl])
+                ws_sync.append_row([str(datetime.date.today()), i.get('word'), i.get('meaning'), i.get('notes', ''), lvl])
+            st.cache_data.clear() # 更新数据后清除缓存
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 记忆复苏 (艾宾浩斯逻辑) ---
+# --- Tab 2: 记忆复苏 (完整保留三连击复习逻辑) ---
 with tab2:
     if not raw_log_df.empty:
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
@@ -145,7 +147,7 @@ with tab2:
         rev_pool = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
 
         if rev_pool.empty:
-            st.info("✨ 卿姐，目前的复习任务已全部完成！")
+            st.info("✨ 卿姐，目前的复习任务已全部完成，太棒了！")
         else:
             if 'rev_queue' not in st.session_state or st.button("🔄 开启新一轮复习"):
                 sample_rev = rev_pool.sample(min(len(rev_pool), 10)).to_dict('records')
@@ -159,6 +161,9 @@ with tab2:
             if not unfinished:
                 st.balloons()
                 st.success("🎉 10 个单词已通过‘三连击’测试！")
+                if st.button("开始下一组"):
+                    del st.session_state['rev_queue']
+                    st.rerun()
             else:
                 if st.session_state.get('need_new_word', True):
                     st.session_state['active_word'] = random.choice(unfinished)
@@ -182,11 +187,12 @@ with tab2:
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: i['count'] = 0
                     st.session_state['need_new_word'] = True
+                    st.toast(f"再看一次 {curr['word']}！")
                     st.rerun()
     else:
-        st.warning("词库为空，先去学习吧！")
+        st.warning("先去挑战攒点词汇吧！")
 
-# --- Tab 3: 足迹 (AI 诊断报告) ---
+# --- Tab 3: 足迹 (完整保留 AI 诊断逻辑) ---
 with tab3:
     if not raw_log_df.empty:
         clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last').copy()
@@ -216,4 +222,5 @@ with tab3:
         st.divider()
         display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("")
         display.columns = ['学习日期', '单词', '中文释义', '我的笔记', '掌握难度']
+        st.write(f"📈 卿姐已累计攻克了 **{len(clean_df)}** 个唯一词汇！")
         st.dataframe(display.sort_values('学习日期', ascending=False), use_container_width=True, hide_index=True)
