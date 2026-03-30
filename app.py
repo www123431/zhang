@@ -227,7 +227,7 @@ with tab2:
                     st.rerun()
 
                 # --- 情况 B: 忘了单词 ---
-                if b2.button("❌ 忘了 (重置进度)", use_container_width=True):
+                if b2.button("❌ 忘了", use_container_width=True):
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: 
                             i['count'] = 0
