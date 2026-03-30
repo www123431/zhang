@@ -72,17 +72,16 @@ try:
     # 1. 尝试获取数据
     df, task_name = get_sheet_data()
     
-    # 2. 🌟 强制点火模式：直接发送，跳过判断
-    print(f"🔥 正在执行强制点火测试：{task_name}")
+    # 2. 🌟 智能对账模式：只有没记录时才发送
+today_str = str(datetime.date.today())
+# 检查日期字段（兼容表头名字）
+date_col = 'date' if 'date' in df.columns else df.columns[0]
+has_record = today_str in df[date_col].astype(str).values
+
+if not has_record:
+    print(f"📡 检测到今日未入账，正在申请 AI 催清收...")
     msg = get_ai_msg(task_name)
     send_wx(msg)
-    print("✅ 消息已成功推送到企业微信！")
-
-except Exception as e:
-    error_msg = f"❌ 脚本运行失败: {str(e)}"
-    print(error_msg)
-    # 如果失败，也尝试发个微信报错，方便定位
-    try:
-        send_wx(f"系统审计报告：点火失败。具体原因：{str(e)[:100]}")
-    except:
-        pass
+    print(f"✅ 提醒已发送: {task_name}")
+else:
+    print(f"✅ 今日已完成{task_name}，资产状态正常，无需提醒。")
