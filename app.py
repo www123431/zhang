@@ -4,198 +4,158 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import datetime
 import time
+import requests
 from io import BytesIO
 from gtts import gTTS
 
 # ==========================================
-# 1. 核心后台：安全认证与稳健发音引擎
+# 1. AI 引擎：DeepSeek 银行场景私教
 # ==========================================
-def init_connection():
+def get_ai_mnemonic(word, meaning):
+    """🧠 调用 DeepSeek API 为卿姐定制银行场景助记词"""
+    api_key = st.secrets.get("deepseek_api_key", "sk-8c10698361c24c71af07315c3abb6582")
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    
+    prompt = f"""
+    角色：你是一名幽默的英语私教，学生‘卿姐’是一位在银行工作的资深员工。
+    任务：为单词 '{word}'（释义：{meaning}）提供一个助记法。
+    要求：结合银行具体场景（如柜台、理财、合规、贷款审批、VIP服务等），语气亲切幽默，开头叫‘卿姐’，40字以内。
+    """
     try:
-        # 从 Streamlit Secrets 获取 GCP 配置
-        creds_dict = st.secrets["gcp_service_account"].to_dict()
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
-        scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"❌ 认证失败，请检查 Secrets: {e}"); st.stop()
-
-def play_audio(word):
-    """🎙️ 原生音频组件：确保在任何设备上点读必响"""
-    try:
-        tts = gTTS(text=word, lang='en')
-        fp = BytesIO()
-        tts.write_to_fp(fp)
-        st.audio(fp, format="audio/mp3")
+        data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7 
+        }
+        response = requests.post(url, json=data, headers=headers, timeout=8)
+        return response.json()['choices'][0]['message']['content']
     except:
-        st.caption("🔊 语音生成中...")
+        return "💡 卿姐，这个词在银行系统中很常见，建议结合日常业务加强记忆。"
 
 # ==========================================
-# 2. 视觉设计语言 (旗舰级 UI 注入)
+# 2. 视觉系统 (CSS 注入)
 # ==========================================
 st.set_page_config(page_title="卿姐英语加油站", page_icon="💃", layout="wide")
 st.markdown("""
     <style>
     .stApp { background-color: #FDFBFF; }
-    
-    /* 旗舰级单词卡片 */
     .word-card-box {
-        background: white;
-        padding: 35px 25px;
-        border-radius: 28px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.04);
-        border: 1px solid #F2F2F2;
-        text-align: center;
-        margin-bottom: 15px;
+        background: white; padding: 30px; border-radius: 25px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid #F2F2F2;
+        text-align: center; margin-bottom: 10px; min-height: 220px;
     }
-    
-    /* 单词大字报样式 */
-    .big-word-text {
-        font-family: 'Georgia', serif;
-        font-size: 4rem;
-        font-weight: 900;
-        color: #2C3E50;
-        margin-bottom: 10px;
-        letter-spacing: -1px;
-    }
-    
-    /* 释义粉色标签 */
-    .pink-tag {
-        font-size: 1.8rem;
-        color: #D02090;
-        background: #FFF0F5;
-        padding: 8px 35px;
-        border-radius: 50px;
-        font-weight: bold;
-        display: inline-block;
-        margin-bottom: 15px;
-    }
-    
-    /* 小副标题 */
-    .sub-label { font-size: 0.85rem; color: #9E9E9E; text-transform: uppercase; margin-bottom: 5px; font-weight: bold; }
+    .big-word-text { font-family: 'Georgia', serif; font-size: 3.5rem; font-weight: 900; color: #2C3E50; }
+    .pink-tag { font-size: 1.5rem; color: #D02090; background: #FFF0F5; padding: 5px 25px; border-radius: 50px; font-weight: bold; display: inline-block; }
+    .ai-box { background-color: #F0FFF4; border-left: 5px solid #48BB78; padding: 12px; border-radius: 10px; margin-top: 10px; font-size: 0.95rem; color: #2D3748; text-align: left;}
+    .sub-label { font-size: 0.8rem; color: #9E9E9E; background: #F8F9FA; padding: 4px 12px; border-radius: 8px; margin-bottom: 8px; display: inline-block; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 数据层：Sheet1 (词库) & Learning_Log (足迹)
+# 3. 数据中枢 (Google Sheets)
 # ==========================================
+def init_connection():
+    creds_dict = st.secrets["gcp_service_account"].to_dict()
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
+    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    return gspread.authorize(creds)
+
 gc = init_connection()
 sh = gc.open("Sheet1")
 
-# --- 读取原始词库 ---
+# 读取词库与日志
 ws_lib = sh.worksheet("Sheet1")
-lib_raw = ws_lib.get_all_values()
-# 自动清洗表头（转小写、去空格）以适配不同表格习惯
-lib_df = pd.DataFrame(lib_raw[1:], columns=[c.lower().strip() for c in lib_raw[0]]) if len(lib_raw)>1 else pd.DataFrame()
+lib_df = pd.DataFrame(ws_lib.get_all_values()[1:], columns=[c.lower().strip() for c in ws_lib.get_all_values()[0]])
 
-# --- 读取/初始化学习日志 ---
 try:
     ws_log = sh.worksheet("Learning_Log")
 except:
     ws_log = sh.add_worksheet(title="Learning_Log", rows="1000", cols="5")
     ws_log.append_row(["date", "word", "meaning", "notes", "level"])
 
-log_all = ws_log.get_all_values()
-raw_log_df = pd.DataFrame(log_all[1:], columns=[c.lower().strip() for c in log_all[0]]) if len(log_all)>1 else pd.DataFrame()
+raw_log_df = pd.DataFrame(ws_log.get_all_values()[1:], columns=[c.lower().strip() for c in ws_log.get_all_values()[0]])
 
 # ==========================================
-# 4. 核心功能：三大 Tab 联动
+# 4. 功能模块
 # ==========================================
-t1, t2, t3 = st.tabs(["🌟 卿姐挑战", "🔄 记忆复苏", "📚 学习足迹"])
+tab1, tab2, tab3 = st.tabs(["🌟 卿姐挑战", "🔄 记忆复苏", "📚 学习足迹"])
 
-# --- Tab 1: 今日新词挑战 ---
-with t1:
-    c_set1, c_set2 = st.columns([1, 4])
-    with c_set1:
+# --- Tab 1: AI 驱动学习 ---
+with tab1:
+    c1, c2 = st.columns([1, 4])
+    with c1:
         lvl = st.radio("今日强度：", options=["🌱 基础", "✨ 进阶", "💪 核心"])
-    with c_set2:
-        if st.button("🚀 换一批新单词", use_container_width=True):
-            if not lib_df.empty:
-                # 随机抽取 8 个词进行学习
-                st.session_state['batch'] = lib_df.sample(min(len(lib_df), 8)).to_dict('records')
+    with c2:
+        if st.button("🚀 呼叫 DeepSeek 换一批", use_container_width=True):
+            selected = lib_df.sample(min(len(lib_df), 8)).to_dict('records')
+            with st.spinner("DeepSeek 正在结合银行场景为卿姐编写助记词..."):
+                for item in selected:
+                    item['ai_tip'] = get_ai_mnemonic(item.get('word'), item.get('meaning'))
+            st.session_state['batch'] = selected
 
     if 'batch' in st.session_state:
-        display_cols = st.columns(2)
-        # AI 动态助记建议
-        ai_tips = [
-            "🧠 **联想建议**：把这个词和你最近在 Business Analytics 课上学到的模型联系起来。",
-            "🎧 **听力强化**：点击下方原生播放条，跟着它念三遍，模仿重音位置。",
-            "✍️ **肌肉记忆**：试着在纸上或心里默拼这个单词，关注它的拼写细节。",
-            "🗣️ **场景模拟**：想象你在向主管汇报时，如何自然地用出这个高级词汇。"
-        ]
-
+        cols = st.columns(2)
         for idx, item in enumerate(st.session_state['batch']):
             word = item.get('word', 'N/A')
-            with display_cols[idx % 2]:
-                # UI 卡片展示（确保不乱码）
+            note_raw = str(item.get('notes', '')).strip()
+            note_show = "VOCAB" if note_raw in ["", "N/A", "nan", "None"] else note_raw
+            
+            with cols[idx % 2]:
                 st.markdown(f"""
                     <div class="word-card-box">
-                        <div class="sub-label">{item.get('notes', 'VOCABULARY')}</div>
+                        <div class="sub-label">{note_show}</div>
                         <div class="big-word-text">{word}</div>
-                        <div class="pink-tag">{item.get('meaning', item.get('chinese', '点击听音'))}</div>
+                        <div class="pink-tag">{item.get('meaning', '未录入')}</div>
+                        <div class="ai-box">🤖 <b>AI 助记：</b>{item.get('ai_tip', '加载中...')}</div>
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # 功能组件：原生发音 + AI 建议
-                play_audio(word)
-                st.info(ai_tips[idx % 4])
+                # 原生音频
+                tts = gTTS(text=word, lang='en')
+                fp = BytesIO(); tts.write_to_fp(fp)
+                st.audio(fp, format="audio/mp3")
                 st.markdown("<br>", unsafe_allow_html=True)
         
-        st.markdown("---")
-        if st.button("✅ 卿姐记住了，同步云端档案", type="primary", use_container_width=True):
+        if st.button("✅ 卿姐记住了，同步云端", type="primary", use_container_width=True):
             for i in st.session_state['batch']:
-                # 将数据写回 Google Sheets
-                ws_log.append_row([
-                    str(datetime.date.today()), 
-                    i.get('word'), 
-                    i.get('meaning', i.get('chinese', 'N/A')), 
-                    i.get('notes', 'N/A'), 
-                    lvl
-                ])
+                ws_log.append_row([str(datetime.date.today()), i.get('word'), i.get('meaning'), i.get('notes'), lvl])
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 记忆复苏 (艾宾浩斯 1/3/7天科学复习) ---
-with t2:
+# --- Tab 2: 艾宾浩斯复习 (1/3/7天) ---
+with tab2:
     if not raw_log_df.empty:
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
         today = datetime.date.today()
-        # 筛选复习节点
-        target_dates = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
-        rev_df = raw_log_df[raw_log_df['dt'].isin(target_dates)].drop_duplicates('word')
+        targets = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
+        rev_df = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
         
         if not rev_df.empty:
-            st.success(f"🌹 卿姐，今天有 {len(rev_df)} 个单词触发了“遗忘节点”，快来温习一下！")
-            for idx, row in enumerate(rev_df.to_dict('records')):
-                with st.expander(f"🔁 复习单词: {row['word']}"):
-                    st.subheader(f"中文意思: {row['meaning']}")
-                    st.write(f"上次笔记: {row['notes']}")
-                    play_audio(row['word'])
+            st.success(f"🌹 卿姐，今日有 {len(rev_df)} 个词需要巩固！")
+            for row in rev_df.to_dict('records'):
+                with st.expander(f"🔁 复习: {row['word']}"):
+                    st.write(f"**意思**: {row['meaning']}")
+                    tts = gTTS(text=row['word'], lang='en')
+                    fp = BytesIO(); tts.write_to_fp(fp); st.audio(fp, format="audio/mp3")
         else:
-            st.info("✨ 卿姐今天太棒了，目前没有到期的复习任务！")
-    else:
-        st.warning("词库还是空的哦，快去【今日挑战】开启第一课吧！")
+            st.info("✨ 卿姐太棒了，目前没有到期的复习任务！")
 
-# --- Tab 3: 学习足迹 (大数据智能分析 & 去重) ---
-with t3:
+# --- Tab 3: 足迹 (专项去重与数据清洗) ---
+with tab3:
     if not raw_log_df.empty:
-        # 去重逻辑：同一个单词如果背了多次，足迹里只显示最新的一次状态
-        clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last')
+        # 1. 深度清洗：彻底抹除 N/A, nan 等干扰项
+        clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last').copy()
+        for col in ['meaning', 'notes', 'level']:
+            if col in clean_df.columns:
+                clean_df[col] = clean_df[col].apply(lambda x: "" if str(x).strip().lower() in ["nan", "n/a", "none", "", "null"] else x)
         
-        # 重新排版表格显示
-        display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("—")
+        # 2. 格式化输出
+        display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("")
         display.columns = ['学习日期', '单词', '中文释义', '我的笔记', '掌握难度']
         
         st.write(f"📊 卿姐已累计攻克了 **{len(clean_df)}** 个词汇！")
+        st.dataframe(display.sort_values('学习日期', ascending=False), use_container_width=True, hide_index=True)
         
-        # 美化表格展示
-        st.dataframe(
-            display.sort_values('学习日期', ascending=False), 
-            use_container_width=True, 
-            hide_index=True
-        )
-        
-        # 导出功能 (BA 必备)
         csv = display.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 导出词汇档案 (CSV)", csv, f"卿姐英语档案_{datetime.date.today()}.csv", "text/csv")
+        st.download_button("📥 导出词汇档案", csv, f"学习档案_{datetime.date.today()}.csv", "text/csv")
