@@ -138,24 +138,30 @@ with tab1:
             st.cache_data.clear() # 更新数据后清除缓存
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 记忆复苏 (实时反馈 + 云端存证版) ---
+# --- Tab 2: 记忆复苏 (BA 精细化评估版) ---
 with tab2:
     if not raw_log_df.empty:
-        # 1. 准备复习池
+        # 1. 扩充复习池逻辑 (涵盖1, 3, 7, 15, 30天，模拟长效复现)
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
         today = datetime.date.today()
-        # 筛选 1, 3, 7 天前的单词进行复习
-        targets = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
+        review_intervals = [1, 3, 7, 15, 30]
+        targets = [today - datetime.timedelta(days=i) for i in review_intervals]
+        
+        # 筛选需要复习的词
         rev_pool = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
 
         if rev_pool.empty:
-            st.info("✨ 卿姐，今天的复习清单空空如也，去学点新词吧！")
-        else:
-            # 初始化复习任务
+            st.info("✨ 卿姐，目前的记忆资产非常稳健！如果想强制复习，请点击下方。")
+            if st.button("🎲 随机抽查库中 10 个词"):
+                rev_pool = raw_log_df.sample(min(len(raw_log_df), 10))
+        
+        if not rev_pool.empty:
             if 'rev_queue' not in st.session_state or st.button("🔄 刷新复习任务"):
                 num_to_rev = min(len(rev_pool), 10)
                 sample_rev = rev_pool.sample(num_to_rev).to_dict('records')
-                for item in sample_rev: item['count'] = 0
+                for item in sample_rev: 
+                    item['count'] = 0 
+                    item['tries'] = 0  # 🌟 新增：记录总尝试次数，用于 BA 评估
                 st.session_state['rev_queue'] = sample_rev
                 st.session_state['need_new_word'] = True
 
@@ -163,14 +169,14 @@ with tab2:
             unfinished = [i for i in queue if i['count'] < 3]
             finished_count = len(queue) - len(unfinished)
 
-            # 进度条展示
+            # 进度条
             st.progress(finished_count / len(queue) if len(queue) > 0 else 0)
-            st.markdown(f"📈 **当前进度：** 已攻克 {finished_count} / {len(queue)} 个单词")
+            st.markdown(f"📈 **当前进度：** 已深度加固 {finished_count} / {len(queue)} 个单词")
 
             if not unfinished:
                 st.balloons()
-                st.success(f"🎉 卿姐太给力了！这 {len(queue)} 个单词已全部完成‘三连击’！")
-                if st.button("开始下一组"):
+                st.success(f"🎉 卿姐太棒了！这 {len(queue)} 个资产已全部完成记忆对账！")
+                if st.button("换一组继续"):
                     del st.session_state['rev_queue']
                     st.rerun()
             else:
@@ -180,65 +186,65 @@ with tab2:
                 
                 curr = st.session_state['active_word']
                 
-                # 单词卡片
+                # 动态背景颜色：如果是“记不牢”的词（尝试次数多），颜色稍深提示
+                card_style = "background: #FFF5F5;" if curr['tries'] > 6 else "background: white;"
+
                 st.markdown(f"""
-                    <div class="word-card-box">
-                        <div class="sub-label">强化进度: {curr['count']}/3</div>
+                    <div class="word-card-box" style="{card_style}">
+                        <div class="sub-label">本轮强化: {curr['count']}/3 | 累计尝试: {curr['tries']} 次</div>
                         <div class="big-word-text">{curr["word"]}</div>
                         <div class="pink-tag">？? ?</div>
                     </div>
                 """, unsafe_allow_html=True)
                 play_audio(curr['word'])
 
-                with st.expander("💡 偷看一眼释义"):
+                with st.expander("💡 提示（记不清点这里）"):
                     st.write(f"释义: {curr['meaning']}")
                 
                 b1, b2 = st.columns(2)
                 
-                # --- 情况 A: 记得单词 ---
-                if b1.button("✅ 记得 (Count+1)", use_container_width=True, type="primary"):
+                if b1.button("✅ 记得", use_container_width=True, type="primary"):
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: 
                             i['count'] += 1
-                            # 🌟 核心改动：达到 3 次时写入云端记录
+                            i['tries'] += 1
                             if i['count'] == 3:
+                                # 🌟 BA 精细化评估逻辑
+                                t = i['tries']
+                                if t == 3: score, stars = "SSS", "⭐⭐⭐⭐⭐"
+                                elif t == 4: score, stars = "SS", "⭐⭐⭐⭐"
+                                elif t <= 6: score, stars = "S", "⭐⭐⭐"
+                                elif t <= 10: score, stars = "A", "⭐⭐"
+                                else: score, stars = "B", "⭐"
+                                
                                 try:
                                     gc_sync = init_connection()
                                     sh_sync = gc_sync.open("Sheet1")
-                                    # 检查/获取 Review_Log 表
-                                    try:
-                                        ws_rev = sh_sync.worksheet("Review_Log")
+                                    try: ws_rev = sh_sync.worksheet("Review_Log")
                                     except:
-                                        ws_rev = sh_sync.add_worksheet("Review_Log", rows="1000", cols="4")
-                                        ws_rev.append_row(["date", "word", "status", "notes"])
+                                        ws_rev = sh_sync.add_worksheet("Review_Log", rows="1000", cols="5")
+                                        ws_rev.append_row(["date", "word", "tries", "score", "stars"])
                                     
-                                    # 写入一行复习记录
-                                    ws_rev.append_row([
-                                        str(datetime.date.today()), 
-                                        curr['word'], 
-                                        "✅ 三连击达成", 
-                                        "复习通过"
-                                    ])
-                                    st.toast(f"🏆 {curr['word']} 已记录到复习档案！")
-                                except Exception as e:
-                                    st.warning(f"记录同步失败(不影响复习): {e}")
-                    
+                                    ws_rev.append_row([str(today), curr['word'], t, score, stars])
+                                    st.toast(f"{stars} {curr['word']} 强化成功！")
+                                except: pass
                     st.session_state['need_new_word'] = True
                     st.rerun()
 
-                # --- 情况 B: 忘了单词 ---
                 if b2.button("❌ 忘了", use_container_width=True):
                     for i in st.session_state['rev_queue']:
                         if i['word'] == curr['word']: 
                             i['count'] = 0
+                            i['tries'] += 1
                     st.session_state['need_new_word'] = True
                     st.rerun()
     else:
-        st.warning("词库还是空的呢，卿姐先去 Tab 1 挑战一下？")
+        st.warning("词库还是空的呢，卿姐先去挑战一下吧！")
 
-# --- Tab 3: 足迹 (完整保留 AI 诊断逻辑) ---
+# --- Tab 3: 足迹 (BA 诊断增强版) ---
 with tab3:
     if not raw_log_df.empty:
+        # 数据清洗保持原样
         clean_df = raw_log_df.drop_duplicates(subset=['word'], keep='last').copy()
         for col in ['meaning', 'notes', 'level']:
             if col in clean_df.columns:
@@ -246,23 +252,45 @@ with tab3:
 
         st.markdown("### 📊 卿姐专属 AI 学习诊断")
         
+        # AI 诊断函数保持原样
         def analyze_progress(df):
             api_key = st.secrets.get("deepseek_api_key", "sk-8c10698361c24c71af07315c3abb6582")
             sample_words = df.tail(10)['word'].tolist()
-            prompt = f"角色：银行英语私教。数据：卿姐已学{len(df)}词，近期词：{', '.join(sample_words)}。任务：写一段50字内的鼓励式学习分析报告，要亲切幽默。"
+            prompt = f"角色：银行英语私教。数据：卿姐已学{len(df)}词。任务：写一段50字内的报告，用银行术语（如：坏账、逾期、优质资产）来评价学习质量，要幽默。"
             try:
                 res = requests.post("https://api.deepseek.com/chat/completions", 
                                     json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}]},
                                     headers={"Authorization": f"Bearer {api_key}"}, timeout=8)
                 return res.json()['choices'][0]['message']['content']
-            except:
-                return "卿姐，你的学习进度比银行存款利息增长得还稳健！继续保持哦！"
+            except: return "卿姐，你的学习资产负债表非常漂亮！"
 
         if st.button("🪄 生成本周 AI 学习分析报告", use_container_width=True):
-            with st.spinner("AI 课代表正在分析报告..."):
+            with st.spinner("正在扫描记忆资产..."):
                 report = analyze_progress(clean_df)
                 st.markdown(f'<div style="background-color: #F0F2F6; padding: 20px; border-radius: 15px; border-left: 5px solid #FF69B4; color: #2C3E50;">🤖 <b>DeepSeek 诊断结果：</b><br>{report}</div>', unsafe_allow_html=True)
         
+        # 🌟 核心增强：复习质量看板
+        try:
+            gc_sh = init_connection()
+            rev_ws = gc_sh.open("Sheet1").worksheet("Review_Log")
+            rev_raw = rev_ws.get_all_values()
+            if len(rev_raw) > 1:
+                rev_df = pd.DataFrame(rev_raw[1:], columns=rev_raw[0])
+                rev_df['tries'] = pd.to_numeric(rev_df['tries'])
+                
+                st.divider()
+                st.markdown("#### 💎 记忆资产质量看板")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.write("🌟 星级分布 (SSS-B)")
+                    st.bar_chart(rev_df['stars'].value_counts())
+                with col_b:
+                    st.write("🚩 顽固单词清单 (平均尝试次数最多)")
+                    hard_list = rev_df.groupby('word')['tries'].mean().sort_values(ascending=False).head(5)
+                    st.table(hard_list)
+        except:
+            st.caption("💡 积累一些复习数据后，这里将显示深度质量看板。")
+
         st.divider()
         display = clean_df.reindex(columns=['date', 'word', 'meaning', 'notes', 'level']).fillna("")
         display.columns = ['学习日期', '单词', '中文释义', '我的笔记', '掌握难度']
