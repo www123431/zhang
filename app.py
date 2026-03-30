@@ -158,23 +158,92 @@ with tab1:
                 ws_log.append_row([str(datetime.date.today()), i.get('word'), i.get('meaning'), i.get('notes'), lvl])
             st.balloons(); time.sleep(1); st.rerun()
 
-# --- Tab 2: 艾宾浩斯复习 (1/3/7天) ---
+# --- Tab 2: 记忆复苏 (艾宾浩斯 + 三次强化逻辑) ---
 with tab2:
+    # 1. 筛选需要复习的数据
     if not raw_log_df.empty:
         raw_log_df['dt'] = pd.to_datetime(raw_log_df['date'], errors='coerce').dt.date
         today = datetime.date.today()
+        # 艾宾浩斯周期：1天, 3天, 7天
         targets = [today - datetime.timedelta(days=i) for i in [1, 3, 7]]
-        rev_df = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
-        
-        if not rev_df.empty:
-            st.success(f"🌹 卿姐，今日有 {len(rev_df)} 个词需要巩固！")
-            for row in rev_df.to_dict('records'):
-                with st.expander(f"🔁 复习: {row['word']}"):
-                    st.write(f"**意思**: {row['meaning']}")
-                    tts = gTTS(text=row['word'], lang='en')
-                    fp = BytesIO(); tts.write_to_fp(fp); st.audio(fp, format="audio/mp3")
+        rev_pool = raw_log_df[raw_log_df['dt'].isin(targets)].drop_duplicates('word')
+
+        if rev_pool.empty:
+            st.info("✨ 卿姐，目前的复习任务已全部完成，太棒了！")
         else:
-            st.info("✨ 卿姐太棒了，目前没有到期的复习任务！")
+            # 2. 初始化复习队列 (只取前10个)
+            if 'rev_queue' not in st.session_state or st.button("🔄 开启新一轮复习"):
+                # 选取10个，并给每个词初始化计数器为 0
+                sample_rev = rev_pool.sample(min(len(rev_pool), 10)).to_dict('records')
+                for item in sample_rev:
+                    item['count'] = 0
+                st.session_state['rev_queue'] = sample_rev
+                st.session_state['current_idx'] = 0
+
+            # 3. 检查是否全部复习完成
+            queue = st.session_state['rev_queue']
+            unfinished = [i for i in queue if i['count'] < 3]
+
+            if not unfinished:
+                st.balloons()
+                st.success("🎉 恭喜卿姐！这 10 个单词已经通过‘三连击’测试，彻底记牢了！")
+                if st.button("开始下一组"):
+                    del st.session_state['rev_queue']
+                    st.rerun()
+            else:
+                # 4. 随机抽取一个未完成的词进行展示 (实现循环随机)
+                import random
+                if 'active_word' not in st.session_state or st.session_state.get('need_new_word', True):
+                    st.session_state['active_word'] = random.choice(unfinished)
+                    st.session_state['need_new_word'] = False
+                
+                current_item = st.session_state['active_word']
+                
+                # 5. 渲染卡片界面
+                st.markdown(f"""
+                    <div style="text-align:center;">
+                        <p style="color:#9E9E9E;">艾宾浩斯强化中 (需记得3次，当前: {current_item['count']}/3)</p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                    <div class="word-card-box">
+                        <div class="big-word-text">{current_item['word']}</div>
+                        <div class="pink-tag">？? ?</div> 
+                    </div>
+                """, unsafe_allow_html=True)
+                # 隐藏释义，只有点复习时才提示
+
+                play_audio(current_item['word'])
+
+                # 6. 交互按钮
+                c1, c2, c3 = st.columns([1, 2, 1])
+                with c2:
+                    with st.expander("💡 提示 (实在想不起来点这里)"):
+                        st.write(f"释义: {current_item['meaning']}")
+                        st.caption(f"笔记: {current_item.get('notes', '无')}")
+
+                btn_c1, btn_c2 = st.columns(2)
+                with btn_c1:
+                    if st.button("✅ 记得", use_container_width=True, type="primary"):
+                        # 找到原队列中的词并加分
+                        for i in st.session_state['rev_queue']:
+                            if i['word'] == current_item['word']:
+                                i['count'] += 1
+                        st.session_state['need_new_word'] = True
+                        st.rerun()
+
+                with btn_c2:
+                    if st.button("❌ 不记得", use_container_width=True):
+                        # 不记得则计数清零，重新开始
+                        for i in st.session_state['rev_queue']:
+                            if i['word'] == current_item['word']:
+                                i['count'] = 0 
+                        st.session_state['need_new_word'] = True
+                        st.toast(f"没关系卿姐，咱们再多看几次 {current_item['word']}！")
+                        st.rerun()
+    else:
+        st.warning("卿姐，还没开始打卡学习呢，先去‘卿姐挑战’攒点词汇吧！")
 
 # --- Tab 3: 足迹 (AI 诊断 + 专项去重清洗) ---
 with tab3:
