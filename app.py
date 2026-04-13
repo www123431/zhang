@@ -232,15 +232,15 @@ def save_memory_profile(profile_data: dict):
             ws.append_row([k, str(v)])
 
 
-def get_ai_word_info_smart(word: str, meaning: str, profile_ctx: str = "") -> tuple:
+def get_ai_word_info_smart(word: str, meaning: str, profile_ctx: str = "") -> dict:
     """
-    DeepSeek 助记 + 例句：核心升级版。
-    当有记忆画像时，AI 会根据卿姐的个人记忆特点定制助记策略，
-    而不是每次都套用同一个银行场景模板。
+    DeepSeek 全量单词信息：助记、例句、近义词、反义词、词形变化。
+    返回 dict，key: mnemonic / example / synonyms / antonyms / word_forms
     """
+    empty = {"mnemonic": "", "example": "", "synonyms": "", "antonyms": "", "word_forms": ""}
     api_key = st.secrets.get("deepseek_api_key", "")
     if not api_key:
-        return "💡 结合银行日常业务来记忆这个词。", ""
+        return empty
 
     if profile_ctx:
         profile_line = (
@@ -252,12 +252,18 @@ def get_ai_word_info_smart(word: str, meaning: str, profile_ctx: str = "") -> tu
 
     prompt = (
         f"你是卿姐（银行员工）的专属英语记忆教练。{profile_line}\n\n"
-        f"请为单词 '{word}'（释义：{meaning}）设计：\n"
-        f'1. 助记：叫"卿姐"，30字内，根据她的记忆特点选最有效的方式\n'
-        f"2. 例句：银行场景英文例句 + 中文翻译\n\n"
-        f"严格按格式输出：\n"
+        f"请为单词 '{word}'（释义：{meaning}）生成以下5项内容：\n"
+        f'1. 助记：叫"卿姐"，30字内，选最有效的记忆方式\n'
+        f"2. 例句：银行场景英文句子 + 中文翻译\n"
+        f"3. 近义词：2~3个英文近义词，逗号分隔\n"
+        f'4. 反义词：1~2个英文反义词，逗号分隔；没有则写"无"\n'
+        f'5. 词形：列出常用词形变化，格式"词(词性)"，如"financial(adj), finance(n)"；没有则写"无"\n\n'
+        f"严格按以下格式逐行输出，不要多余内容：\n"
         f"助记：[内容]\n"
-        f"例句：[English]（[中文]）"
+        f"例句：[English sentence]（[中文翻译]）\n"
+        f"近义词：[内容]\n"
+        f"反义词：[内容]\n"
+        f"词形：[内容]"
     )
     try:
         resp = requests.post(
@@ -268,18 +274,24 @@ def get_ai_word_info_smart(word: str, meaning: str, profile_ctx: str = "") -> tu
                 "temperature": 0.7,
             },
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-            timeout=10,
+            timeout=20,
         )
         content = resp.json()["choices"][0]["message"]["content"].strip()
-        mnemonic, example = "", ""
+        result = dict(empty)
         for line in content.split("\n"):
             if line.startswith("助记："):
-                mnemonic = line.replace("助记：", "").strip()
+                result["mnemonic"] = line.replace("助记：", "").strip()
             elif line.startswith("例句："):
-                example = line.replace("例句：", "").strip()
-        return mnemonic or "💡 结合银行日常业务来记忆这个词。", example
-    except Exception:
-        return "💡 结合银行日常业务来记忆这个词。", ""
+                result["example"] = line.replace("例句：", "").strip()
+            elif line.startswith("近义词："):
+                result["synonyms"] = line.replace("近义词：", "").strip()
+            elif line.startswith("反义词："):
+                result["antonyms"] = line.replace("反义词：", "").strip()
+            elif line.startswith("词形："):
+                result["word_forms"] = line.replace("词形：", "").strip()
+        return result
+    except Exception as e:
+        return {**empty, "mnemonic": f"❌ AI失败：{e}"}
 
 
 # =====================================================================
@@ -480,8 +492,8 @@ default_rev = cfg_get(cfg_df, "daily_review_words", 20)
 # =====================================================================
 with st.sidebar:
     st.markdown("## ⚙️ 学习计划")
-    daily_new = st.slider("每日新词目标", 5, 50, default_new, key="sl_new")
-    daily_rev = st.slider("每日复习目标", 5, 100, default_rev, key="sl_rev")
+    daily_new = st.number_input("每日新词目标", min_value=1, max_value=100, value=default_new, step=1, key="sl_new")
+    daily_rev = st.number_input("每日复习目标", min_value=1, max_value=200, value=default_rev, step=1, key="sl_rev")
 
     if st.button("💾 保存计划", use_container_width=True):
         try:
@@ -597,7 +609,6 @@ with tab1:
                 st.session_state.update({
                     "learn_batch": batch,
                     "learn_idx": 0,
-                    "learn_flipped": False,
                     "learn_ai_cache": {},
                     "learn_confirmed": set(),
                 })
@@ -625,7 +636,7 @@ with tab1:
                             ws4.append_rows(rows)
                             st.cache_data.clear()
                             st.balloons()
-                            for k in ["learn_batch", "learn_idx", "learn_flipped", "learn_ai_cache", "learn_confirmed"]:
+                            for k in ["learn_batch", "learn_idx", "learn_ai_cache", "learn_confirmed"]:
                                 st.session_state.pop(k, None)
                             st.rerun()
                         except Exception as e:
@@ -633,15 +644,12 @@ with tab1:
 
                 if unconfirmed:
                     col_r1, col_r2 = st.columns(2)
-                    if col_r1.button(f"🔁 重试没记住的 {len(unconfirmed)} 词", use_container_width=True):
-                        # 只重置索引和翻牌状态，把 batch 换成未确认的词
+                    if col_r1.button(f"🔁 重新学没记住的 {len(unconfirmed)} 词", use_container_width=True):
                         st.session_state["learn_batch"] = unconfirmed
                         st.session_state["learn_idx"] = 0
-                        st.session_state["learn_flipped"] = False
                         st.session_state["learn_confirmed"] = set()
                         st.rerun()
                     if col_r2.button("⏭️ 跳过，学下一批", use_container_width=True):
-                        # 先同步已记住的（如果有），再清空 batch
                         if to_sync:
                             try:
                                 gc4b = init_connection()
@@ -653,7 +661,7 @@ with tab1:
                                 st.cache_data.clear()
                             except Exception:
                                 pass
-                        for k in ["learn_batch", "learn_idx", "learn_flipped", "learn_ai_cache", "learn_confirmed"]:
+                        for k in ["learn_batch", "learn_idx", "learn_ai_cache", "learn_confirmed"]:
                             st.session_state.pop(k, None)
                         st.rerun()
 
@@ -662,57 +670,67 @@ with tab1:
                 curr = batch[idx]
                 word = curr.get("word", "")
                 meaning = curr.get("meaning", "未录入")
-                flipped = st.session_state["learn_flipped"]
 
-                # 翻牌后才加载 AI + 音标（缓存到 session）
+                # 立即加载全量 AI 内容（音标 + 助记 + 例句 + 近义词 + 反义词 + 词形）
                 ai_cache = st.session_state["learn_ai_cache"]
-                if flipped and word not in ai_cache:
-                    with st.spinner("AI 正在根据你的记忆特点生成助记…"):
-                        mnemonic, example = get_ai_word_info_smart(word, meaning, profile_ctx)
+                if word not in ai_cache:
+                    with st.spinner("AI 生成助记、例句、近义词…"):
+                        ai_data = get_ai_word_info_smart(word, meaning, profile_ctx)
                         phonetic = get_phonetic(word)
-                        ai_cache[word] = {"mnemonic": mnemonic, "example": example, "phonetic": phonetic}
+                        ai_cache[word] = {**ai_data, "phonetic": phonetic}
                     st.session_state["learn_ai_cache"] = ai_cache
 
                 ai = ai_cache.get(word, {})
-                phonetic_html = f'<div class="phonetic-text">{ai.get("phonetic","")}</div>' if flipped and ai.get("phonetic") else ""
-                meaning_html = f'<div class="pink-tag">{meaning}</div>' if flipped else '<div class="hidden-tag">？？？</div>'
 
-                # 进度标记
+                # 进度
                 st.markdown(
                     f'<div style="text-align:right"><span class="sub-label">{idx+1} / {len(batch)}</span></div>',
                     unsafe_allow_html=True,
                 )
 
+                # 单词主卡
+                phonetic_str = ai.get("phonetic", "")
+                phonetic_html = f'<div class="phonetic-text">{phonetic_str}</div>' if phonetic_str else ""
                 st.markdown(f"""
                 <div class="word-card-box">
                     <div class="big-word-text">{word}</div>
                     {phonetic_html}
-                    {meaning_html}
+                    <div class="pink-tag">{meaning}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 play_audio(word)
 
-                if flipped:
-                    if ai.get("mnemonic"):
-                        st.markdown(f'<div class="ai-box">🤖 <b>AI 助记：</b>{ai["mnemonic"]}</div>', unsafe_allow_html=True)
-                    if ai.get("example"):
-                        st.markdown(f'<div class="example-box">📝 <b>例句：</b>{ai["example"]}</div>', unsafe_allow_html=True)
+                # AI 助记
+                if ai.get("mnemonic"):
+                    st.markdown(f'<div class="ai-box">🤖 <b>AI 助记：</b>{ai["mnemonic"]}</div>', unsafe_allow_html=True)
 
-                    col_ok, col_no = st.columns(2)
-                    if col_ok.button("✅ 记住了", use_container_width=True, type="primary", key="learn_ok"):
-                        st.session_state["learn_confirmed"].add(word)
-                        st.session_state["learn_idx"] += 1
-                        st.session_state["learn_flipped"] = False
-                        st.rerun()
-                    if col_no.button("❌ 还没记住", use_container_width=True, key="learn_no"):
-                        st.session_state["learn_idx"] += 1
-                        st.session_state["learn_flipped"] = False
-                        st.rerun()
-                else:
-                    if st.button("👀 翻开看答案", use_container_width=True, type="primary", key="learn_flip"):
-                        st.session_state["learn_flipped"] = True
-                        st.rerun()
+                # 例句
+                if ai.get("example"):
+                    st.markdown(f'<div class="example-box">📝 <b>例句：</b>{ai["example"]}</div>', unsafe_allow_html=True)
+
+                # 近义词 / 反义词 / 词形 三列
+                syn = ai.get("synonyms", "")
+                ant = ai.get("antonyms", "")
+                wf  = ai.get("word_forms", "")
+                if any(v and v != "无" for v in [syn, ant, wf]):
+                    col_s, col_a, col_f = st.columns(3)
+                    if syn and syn != "无":
+                        col_s.markdown(f"**🔗 近义词**\n\n{syn}")
+                    if ant and ant != "无":
+                        col_a.markdown(f"**↔️ 反义词**\n\n{ant}")
+                    if wf and wf != "无":
+                        col_f.markdown(f"**🔄 词形变化**\n\n{wf}")
+
+                st.markdown("---")
+                col_ok, col_no = st.columns(2)
+                if col_ok.button("✅ 掌握了，下一个", use_container_width=True, type="primary", key="learn_ok"):
+                    st.session_state["learn_confirmed"].add(word)
+                    st.session_state["learn_idx"] += 1
+                    st.rerun()
+                if col_no.button("🔁 再看一遍", use_container_width=True, key="learn_no"):
+                    st.session_state["learn_idx"] += 1
+                    st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -827,13 +845,13 @@ with tab2:
                 hardness = "🔴 顽固词" if ef < 1.8 else ("🟡 普通" if ef < 2.5 else "🟢 掌握良好")
                 nxt_days = curr.get("interval", 1)
 
-                # 翻牌后加载音标 + AI 助记/例句（缓存避免重复调用）
+                # 翻牌后加载音标 + AI 全量内容（缓存避免重复调用）
                 rev_ai_cache = st.session_state.get("rev_ai_cache", {})
                 if flipped and word not in rev_ai_cache:
                     with st.spinner("AI 根据你的记忆特点生成复习提示…"):
-                        mnemonic, example = get_ai_word_info_smart(word, meaning, profile_ctx)
+                        ai_data = get_ai_word_info_smart(word, meaning, profile_ctx)
                         phonetic = get_phonetic(word)
-                        rev_ai_cache[word] = {"mnemonic": mnemonic, "example": example, "phonetic": phonetic}
+                        rev_ai_cache[word] = {**ai_data, "phonetic": phonetic}
                     st.session_state["rev_ai_cache"] = rev_ai_cache
 
                 rev_ai = rev_ai_cache.get(word, {})
@@ -861,6 +879,17 @@ with tab2:
                         st.markdown(f'<div class="ai-box">🤖 <b>AI 助记：</b>{rev_ai["mnemonic"]}</div>', unsafe_allow_html=True)
                     if rev_ai.get("example"):
                         st.markdown(f'<div class="example-box">📝 <b>例句：</b>{rev_ai["example"]}</div>', unsafe_allow_html=True)
+                    syn_r = rev_ai.get("synonyms", "")
+                    ant_r = rev_ai.get("antonyms", "")
+                    wf_r  = rev_ai.get("word_forms", "")
+                    if any(v and v != "无" for v in [syn_r, ant_r, wf_r]):
+                        rc1, rc2, rc3 = st.columns(3)
+                        if syn_r and syn_r != "无":
+                            rc1.markdown(f"**🔗 近义词**\n\n{syn_r}")
+                        if ant_r and ant_r != "无":
+                            rc2.markdown(f"**↔️ 反义词**\n\n{ant_r}")
+                        if wf_r and wf_r != "无":
+                            rc3.markdown(f"**🔄 词形**\n\n{wf_r}")
                     st.markdown("**我记得这个词…**")
                     b1, b2, b3, b4 = st.columns(4)
 
