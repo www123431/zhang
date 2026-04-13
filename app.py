@@ -253,7 +253,7 @@ def get_ai_word_info_smart(word: str, meaning: str, profile_ctx: str = "") -> tu
     prompt = (
         f"你是卿姐（银行员工）的专属英语记忆教练。{profile_line}\n\n"
         f"请为单词 '{word}'（释义：{meaning}）设计：\n"
-        f"1. 助记：叫"卿姐"，30字内，根据她的记忆特点选最有效的方式\n"
+        f'1. 助记：叫"卿姐"，30字内，根据她的记忆特点选最有效的方式\n'
         f"2. 例句：银行场景英文例句 + 中文翻译\n\n"
         f"严格按格式输出：\n"
         f"助记：[内容]\n"
