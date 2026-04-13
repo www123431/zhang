@@ -1,62 +1,57 @@
 # -*- coding: utf-8 -*-
-import docx
+"""
+word.py — 词库工具脚本
+用途：解析 mom_1000_words.docx，导出为 words.txt（单词\t释义 格式）
+      方便通过 App 侧栏的"词库导入"功能上传到 Google Sheets
+
+使用方法：
+    python word.py
+输出：同目录下的 words.txt
+"""
 import os
+import docx
 
-def create_1000_words_docx(file_path):
-    """
-    生成一个包含1000个英语常用单词的Word文档
-    """
-    # 核心高频词汇（前100个）
-    top_100_words = [
-        "the", "be", "to", "of", "and", "a", "in", "that", "have", "I", 
-        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
-        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", 
-        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
-        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", 
-        "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
-        "people", "into", "year", "your", "good", "some", "could", "them", "see", "other", 
-        "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
-        "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", 
-        "even", "new", "want", "because", "any", "these", "give", "day", "most", "us"
-    ]
 
-    # 生活常用分类词汇
-    life_words = [
-        "Market", "Supermarket", "Vegetable", "Fruit", "Price", "Cheap", "Expensive",
-        "Kitchen", "Cook", "Water", "Drink", "Food", "Breakfast", "Lunch", "Dinner",
-        "Doctor", "Hospital", "Medicine", "Pain", "Help", "Walk", "Park", "Friend",
-        "Family", "Son", "Daughter", "Grandchild", "Telephone", "Money", "Shop"
-    ]
+def parse_docx_to_txt(docx_path: str, output_path: str):
+    if not os.path.exists(docx_path):
+        print(f"❌ 找不到文件：{docx_path}")
+        return
 
-    doc = docx.Document()
-    # 使用中文字体标题需要注意，这里先用英文标题避免环境字体缺失报错
-    doc.add_heading('English Learning List for Mom (1000 Words)', 0)
-    
-    # 组合单词并去重
-    all_words = list(dict.fromkeys(top_100_words + life_words))
-    
-    # 循环生成直到满足1000个单词
-    # 实际项目中这里可以从外部CSV或TXT加载真实1000词
-    final_list = all_words.copy()
-    counter = 1
-    while len(final_list) < 1000:
-        base_word = all_words[counter % len(all_words)]
-        final_list.append(f"{base_word}_{len(final_list)//len(all_words)}")
-        counter += 1
+    doc = docx.Document(docx_path)
+    results = []
 
-    # 写入文档
-    for word in final_list:
-        doc.add_paragraph(word)
+    for para in doc.paragraphs:
+        line = para.text.strip()
+        if not line:
+            continue
 
-    # 确保保存路径存在
-    directory = os.path.dirname(file_path)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+        # 支持多种分隔符：制表符、中文全角空格、逗号、冒号、普通空格
+        for sep in ["\t", "，", "　", ",", "：", ":", "  "]:
+            if sep in line:
+                parts = line.split(sep, 1)
+                word = parts[0].strip()
+                meaning = parts[1].strip() if len(parts) > 1 else ""
+                if word:
+                    results.append((word, meaning))
+                break
+        else:
+            # 没有找到分隔符，整行作为单词，释义留空
+            results.append((line, ""))
 
-    doc.save(file_path)
-    print(f"Success! File saved at: {file_path}")
+    if not results:
+        print("⚠️  未解析到任何内容，请检查文档格式。")
+        return
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for word, meaning in results:
+            f.write(f"{word}\t{meaning}\n")
+
+    print(f"✅ 导出完成！共 {len(results)} 条 → {output_path}")
+    print("   现在可以在 App 侧栏上传 words.txt 导入词库。")
+
 
 if __name__ == "__main__":
-    # 使用原始字符串处理 Windows 路径
-    target_path = r"C:\Users\72360\Desktop\app\mom_1000_words.docx"
-    create_1000_words_docx(target_path)
+    base = os.path.dirname(os.path.abspath(__file__))
+    docx_file = os.path.join(base, "mom_1000_words.docx")
+    txt_file = os.path.join(base, "words.txt")
+    parse_docx_to_txt(docx_file, txt_file)
